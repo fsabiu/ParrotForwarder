@@ -193,7 +193,6 @@ sudo apt-get install -y \
 ### 2. Clone Repository
 
 ```bash
-cd /home/gonareva
 git clone <repository-url> drone
 cd drone
 ```
@@ -235,7 +234,6 @@ python test_video_stream.py
 
 ```bash
 # Activate virtual environment
-cd /home/gonareva/drone
 source drone_env/bin/activate
 
 # Run with default settings (telemetry: 10 Hz, video: 30 fps)
