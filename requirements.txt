@@ -1,0 +1,61 @@
+# Python 3.11.2
+# Use: python3.11 -m venv drone_env
+# Then: source drone_env/bin/activate
+# Then: pip install -r requirements.txt
+
+# Main package
+parrot-olympe==0.0.0
+
+# Critical: protobuf must be < 4.0 for compatibility with Python 3.11+
+protobuf==3.20.3
+
+# For video frame processing and saving
+opencv-python>=4.5.0
+PySDL2>=0.9.7
+PyOpenGL>=3.1.0
+
+# Direct dependencies
+aenum==3.1.16
+asn1tools==0.167.0
+boltons==25.0.0
+colorlog==6.9.0
+dacite==1.9.2
+future==1.0.0
+geopy==2.4.1
+ipython==9.6.0
+numpy==2.3.3
+pycryptodomex==3.23.0
+pytz==2025.2
+PyYAML==6.0.3
+requests==2.32.5
+six==1.17.0
+tzlocal==3.0
+yapf==0.43.0
+websocket_client==1.8.0
+
+# Transitive dependencies
+bitstruct==8.21.0
+pyparsing==3.2.5
+geographiclib==2.1
+decorator==5.2.1
+ipython-pygments-lexers==1.1.1
+jedi==0.19.2
+matplotlib-inline==0.1.7
+pexpect==4.9.0
+prompt_toolkit==3.0.52
+pygments==2.19.2
+stack_data==0.6.3
+traitlets==5.14.3
+typing_extensions==4.15.0
+wcwidth==0.2.14
+parso==0.8.5
+ptyprocess==0.7.0
+charset_normalizer==3.4.3
+idna==3.10
+urllib3==2.5.0
+certifi==2025.8.3
+executing==2.2.1
+asttokens==3.0.0
+pure-eval==0.2.3
+platformdirs==4.4.0
+
