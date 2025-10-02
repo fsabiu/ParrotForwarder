@@ -34,6 +34,10 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 
+# Suppress verbose Olympe SDK logs
+logging.getLogger('olympe').setLevel(logging.WARNING)
+logging.getLogger('ulog').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
@@ -591,18 +595,48 @@ class ParrotForwarder:
         # Debug: log what we received
         self.logger.info(f"DEBUG: ParrotForwarder init - remote_host={remote_host}, type={type(remote_host)}")
         
-    def connect(self):
-        """Connect to the drone."""
-        self.logger.info(f"Connecting to drone at {self.drone_ip}...")
+    def connect(self, max_retries=None, retry_interval=5):
+        """
+        Connect to the drone with retry logic.
+        
+        Args:
+            max_retries: Maximum number of connection attempts (None = infinite)
+            retry_interval: Seconds to wait between retries
+        """
         self.drone = olympe.Drone(self.drone_ip)
         
-        if not self.drone.connect():
-            raise ConnectionError(f"Failed to connect to drone at {self.drone_ip}")
-        
-        self.logger.info("✓ Connected to drone")
-        
-        # Wait for initial telemetry
-        time.sleep(1)
+        attempt = 0
+        while True:
+            attempt += 1
+            
+            if max_retries and attempt > max_retries:
+                raise ConnectionError(f"Failed to connect to drone at {self.drone_ip} after {max_retries} attempts")
+            
+            try:
+                self.logger.info(f"Connecting to drone at {self.drone_ip}... (attempt {attempt})")
+                
+                if self.drone.connect():
+                    self.logger.info("✓ Connected to drone")
+                    # Wait for initial telemetry
+                    time.sleep(1)
+                    return
+                else:
+                    self.logger.warning(f"⚠ Connection attempt {attempt} failed")
+                    
+            except KeyboardInterrupt:
+                self.logger.info("\n⚠ Connection interrupted by user")
+                raise
+            except Exception as e:
+                self.logger.error(f"✗ Connection attempt {attempt} error: {e}")
+            
+            # Wait before retry (with KeyboardInterrupt handling)
+            if max_retries is None or attempt < max_retries:
+                try:
+                    self.logger.info(f"Retrying in {retry_interval} seconds... (Ctrl+C to cancel)")
+                    time.sleep(retry_interval)
+                except KeyboardInterrupt:
+                    self.logger.info("\n⚠ Retry interrupted by user")
+                    raise
         
     def start_forwarding(self):
         """Start both telemetry and video forwarding."""
@@ -674,15 +708,17 @@ class ParrotForwarder:
             except Exception as e:
                 self.logger.error(f"Error during disconnect: {e}")
     
-    def run(self, duration=None):
+    def run(self, duration=None, max_retries=None, retry_interval=5):
         """
         Run the forwarder for a specified duration or until interrupted.
         
         Args:
             duration: Duration in seconds (None = run indefinitely)
+            max_retries: Maximum connection retry attempts (None = infinite)
+            retry_interval: Seconds between connection retries
         """
         try:
-            self.connect()
+            self.connect(max_retries=max_retries, retry_interval=retry_interval)
             self.start_forwarding()
             
             if duration:
@@ -694,8 +730,10 @@ class ParrotForwarder:
                     while True:
                         time.sleep(1)
                 except KeyboardInterrupt:
-                    self.logger.info("Interrupted by user")
+                    self.logger.info("\n⚠ Interrupted by user")
             
+        except KeyboardInterrupt:
+            self.logger.info("\n⚠ Shutting down gracefully...")
         except Exception as e:
             self.logger.error(f"Error: {e}")
             raise
@@ -753,8 +791,31 @@ def main():
         default=None,
         help='Duration to run in seconds (default: run indefinitely)'
     )
+    parser.add_argument(
+        '--max-retries',
+        type=int,
+        default=None,
+        help='Maximum connection retry attempts (default: infinite)'
+    )
+    parser.add_argument(
+        '--retry-interval',
+        type=int,
+        default=5,
+        help='Seconds to wait between connection retries (default: 5)'
+    )
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Enable verbose SDK logging (shows all Olympe logs)'
+    )
     
     args = parser.parse_args()
+    
+    # Enable verbose SDK logging if requested
+    if args.verbose:
+        logging.getLogger('olympe').setLevel(logging.INFO)
+        logging.getLogger('ulog').setLevel(logging.INFO)
+        logger.info("Verbose SDK logging enabled")
     
     # Debug: log parsed arguments
     logger.info(f"DEBUG: Parsed args - remote_host={args.remote_host}, telemetry_port={args.telemetry_port}")
@@ -764,18 +825,33 @@ def main():
         logger.warning("No --remote-host specified. Running in monitoring mode (no forwarding).")
     
     # Create and run forwarder
-    forwarder = ParrotForwarder(
-        drone_ip=args.drone_ip,
-        telemetry_fps=args.telemetry_fps,
-        video_fps=args.video_fps,
-        remote_host=args.remote_host,
-        telemetry_port=args.telemetry_port,
-        video_port=args.video_port
-    )
+    try:
+        forwarder = ParrotForwarder(
+            drone_ip=args.drone_ip,
+            telemetry_fps=args.telemetry_fps,
+            video_fps=args.video_fps,
+            remote_host=args.remote_host,
+            telemetry_port=args.telemetry_port,
+            video_port=args.video_port
+        )
+        
+        forwarder.run(
+            duration=args.duration,
+            max_retries=args.max_retries,
+            retry_interval=args.retry_interval
+        )
+        
+    except KeyboardInterrupt:
+        logger.info("\n✓ Exited cleanly")
+        return 0
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        return 1
     
-    forwarder.run(duration=args.duration)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main())
 
