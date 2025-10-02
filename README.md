@@ -31,11 +31,12 @@ A high-performance Python application for capturing and forwarding telemetry dat
 
 ParrotForwarder is a professional-grade drone telemetry and video forwarding system built on Parrot's Olympe SDK. It provides:
 
-- **Real-time telemetry streaming** at configurable rates (default: 10 Hz)
+- **Real-time telemetry streaming** at configurable rates (default: 10 Hz) via JSON over UDP
 - **Video stream forwarding** with precise frame rate control (default: 30 fps)
 - **USB connectivity** to Parrot Anafi drones via Skycontroller 3
 - **Performance monitoring** with detailed FPS tracking and timing statistics
-- **Modular architecture** with separate threaded forwarders for telemetry and video
+- **Modular architecture** with cleanly separated components and thread-safe operation
+- **Connection retry logic** with graceful error handling and recovery
 
 ### Use Cases
 
@@ -90,7 +91,9 @@ ParrotForwarder is a professional-grade drone telemetry and video forwarding sys
 
 ## Architecture
 
-ParrotForwarder uses a **multi-threaded architecture** to ensure independent, high-performance telemetry and video processing:
+ParrotForwarder uses a **modular, multi-threaded architecture** with clean separation of concerns for maintainability and extensibility:
+
+### System Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -98,53 +101,187 @@ ParrotForwarder uses a **multi-threaded architecture** to ensure independent, hi
 │                  (via Skycontroller 3)                      │
 └────────────────────┬────────────────────────────────────────┘
                      │ USB Connection (192.168.53.1)
+                     │ - Olympe SDK Communication
                      │
 ┌────────────────────▼────────────────────────────────────────┐
 │              Raspberry Pi 4 - ParrotForwarder               │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │           Main Controller (ParrotForwarder)          │  │
-│  │  - Drone connection management                       │  │
-│  │  - Thread lifecycle control                          │  │
-│  │  - Graceful shutdown handling                        │  │
+│  │              CLI Layer (cli.py)                      │  │
+│  │  - Argument parsing                                  │  │
+│  │  - Logging configuration                             │  │
+│  │  - Application entry point                           │  │
+│  └────┬─────────────────────────────────────────────────┘  │
+│       │                                                     │
+│  ┌────▼─────────────────────────────────────────────────┐  │
+│  │        Main Controller (main.py)                     │  │
+│  │        ParrotForwarder Class                         │  │
+│  ├──────────────────────────────────────────────────────┤  │
+│  │  • Drone connection with retry logic                │  │
+│  │  • Thread lifecycle management                       │  │
+│  │  • Graceful shutdown (KeyboardInterrupt)            │  │
+│  │  • Resource cleanup                                  │  │
 │  └────┬──────────────────────────────────────────┬──────┘  │
 │       │                                           │          │
 │  ┌────▼─────────────────────┐   ┌───────────────▼──────┐  │
 │  │  TelemetryForwarder      │   │   VideoForwarder     │  │
-│  │  (Thread)                │   │   (Thread)           │  │
+│  │  (telemetry.py)          │   │   (video.py)         │  │
+│  │  Thread 1                │   │   Thread 2           │  │
 │  ├──────────────────────────┤   ├──────────────────────┤  │
 │  │ • Reads drone state      │   │ • YUV frame callback │  │
 │  │ • Collects telemetry     │   │ • YUV→BGR conversion │  │
 │  │ • Precise 10 Hz timing   │   │ • Frame buffering    │  │
 │  │ • JSON serialization     │   │ • Precise 30 fps     │  │
-│  │ • Performance tracking   │   │ • Performance track  │  │
+│  │ • UDP socket management  │   │ • Performance track  │  │
+│  │ • Performance tracking   │   │ • [Video forwarding] │  │
 │  └────┬─────────────────────┘   └───────────┬──────────┘  │
-│       │                                      │              │
-│       │ [TODO: Output Implementation]       │              │
+│       │ JSON over UDP                       │              │
+│       │ (Non-blocking socket)               │              │
 │       ▼                                      ▼              │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │         Forwarding Layer (To Be Implemented)         │  │
-│  │  • UDP/TCP streaming                                 │  │
-│  │  • WebSocket connections                             │  │
-│  │  • RTMP video encoding                               │  │
-│  │  • Message queuing                                   │  │
+│  │              Forwarding Layer                        │  │
+│  │  Telemetry: ✓ JSON/UDP (Implemented)               │  │
+│  │  Video:     ⏳ H.264/RTP (TODO)                     │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────┬───────────────────────────────────┘
-                          │ VPN Connection
+                          │ VPN Connection (Tailscale)
+                          │ UDP Packets
                           ▼
-                   ┌──────────────┐
-                   │ Remote Host  │
-                   │  (Receiver)  │
-                   └──────────────┘
+                   ┌──────────────────────┐
+                   │    Remote Host       │
+                   │ telemetry_receiver.py│
+                   │  - UDP listener      │
+                   │  - JSON parser       │
+                   │  - Telemetry display │
+                   └──────────────────────┘
+```
+
+### Module Structure
+
+The codebase is organized as a Python package with clear separation of concerns:
+
+```
+parrot_forwarder/
+├── __init__.py          # Package exports (TelemetryForwarder, VideoForwarder, ParrotForwarder)
+├── cli.py               # Command-line interface, argument parsing, logging setup
+├── main.py              # ParrotForwarder coordinator class
+├── telemetry.py         # TelemetryForwarder thread (independent telemetry handling)
+└── video.py             # VideoForwarder thread (independent video handling)
+```
+
+**Benefits of Modular Design:**
+- Each module has a single, well-defined responsibility
+- Easy to test components in isolation
+- Simple to extend (e.g., add new forwarding protocols)
+- Clear dependency hierarchy (CLI → Main → Workers)
+- Enables code reuse (import individual forwarders elsewhere)
+
+### Thread Communication Model
+
+```
+Main Thread (ParrotForwarder)
+    │
+    ├─── Creates ──→ TelemetryForwarder Thread
+    │                   │
+    │                   ├─ Reads: Olympe drone.get_state()
+    │                   ├─ Writes: UDP socket (non-blocking)
+    │                   └─ Independent timing loop (10 Hz)
+    │
+    ├─── Creates ──→ VideoForwarder Thread
+    │                   │
+    │                   ├─ Receives: YUV callbacks (Olympe video thread)
+    │                   ├─ Locks: self.lock for frame buffer
+    │                   └─ Independent timing loop (30 fps)
+    │
+    └─── Monitors ──→ Graceful shutdown
+                        - Calls stop() on both threads
+                        - Waits for threads to finish (join)
+                        - Closes drone connection
 ```
 
 ### Key Design Principles
 
-1. **Separation of Concerns**: Telemetry and video processing are completely independent
-2. **Thread Safety**: All shared state protected with locks
-3. **Precise Timing**: Target-time-based scheduling prevents drift accumulation
-4. **Fail-Safe**: Each component handles errors independently without crashing others
-5. **Observable**: Comprehensive performance metrics for production monitoring
+1. **Separation of Concerns**: Each module handles one aspect of the system
+   - CLI handles user interface
+   - Main handles coordination
+   - Workers handle specific data streams
+
+2. **Thread Independence**: Telemetry and video processing run completely independently
+   - No shared state between forwarders
+   - Independent performance characteristics
+   - Isolated error handling
+
+3. **Thread Safety**: Shared resources protected with locks
+   - `threading.Lock` for video frame buffer
+   - Non-blocking UDP sockets prevent blocking
+
+4. **Precise Timing**: Target-time-based scheduling prevents drift
+   - `next_frame_time += interval` (not `sleep(interval)`)
+   - Automatic drift detection and reset
+   - Performance warnings if falling behind
+
+5. **Fail-Safe Operation**: Graceful error handling at every level
+   - Connection retry logic with exponential backoff
+   - Per-thread exception handling
+   - Clean shutdown on `KeyboardInterrupt`
+   - Resource cleanup in finally blocks
+
+6. **Observable Performance**: Real-time metrics for production monitoring
+   - Actual vs target FPS tracking
+   - Loop timing statistics (avg, min, max)
+   - Performance indicators (✓ ⚠ ✗)
+   - UDP send statistics (packets sent, errors)
+
+7. **Extensibility**: Easy to add new features
+   - Add new forwarders (e.g., audio, metadata)
+   - Swap forwarding protocols (UDP → TCP → WebSocket)
+   - Add data transformations (filters, compression)
+   - Implement recording capabilities
+
+### Data Flow
+
+**Telemetry Path:**
+```
+Drone State → get_state() → Telemetry Dict → JSON → UDP Socket → Remote Host
+   (Olympe)     (10 Hz)      (Python)      (bytes)   (network)    (Receiver)
+```
+
+**Video Path (Current):**
+```
+Drone Camera → YUV Callback → BGR Conversion → Frame Buffer → [TODO: Encode → UDP/RTP]
+   (H.264)      (Olympe)        (OpenCV)         (numpy)         (GStreamer)
+```
+
+### Performance Characteristics
+
+| Component | Target | Typical Performance | Notes |
+|-----------|--------|---------------------|-------|
+| Telemetry Thread | 10 Hz | 10.01-10.04 Hz (100%+) | Consistently meets target |
+| Video Thread | 30 fps | 28-30 fps (95-100%) | Limited by drone output |
+| Loop Overhead | <1ms | 0.05-0.10ms avg | Minimal CPU usage |
+| Connection Retry | Configurable | 5s default | Non-blocking for other operations |
+
+### Error Handling Strategy
+
+```
+Level 1: Method-level
+  └─ Try/catch in individual methods (e.g., forward_telemetry)
+     └─ Log error, increment error counter, continue
+
+Level 2: Loop-level
+  └─ Try/catch in thread run() loops
+     └─ Log error, reset timing, continue loop
+
+Level 3: Thread-level
+  └─ Catch KeyboardInterrupt in run() methods
+     └─ Set running=False, exit gracefully
+
+Level 4: Application-level
+  └─ Catch KeyboardInterrupt in main()
+     └─ Stop all threads, disconnect, exit cleanly
+```
+
+This layered approach ensures that errors at any level are handled appropriately without crashing the entire system.
 
 ---
 
@@ -246,33 +383,61 @@ python ParrotForwarder.py
 python ParrotForwarder.py [OPTIONS]
 
 Options:
-  --drone-ip IP          Drone IP address (default: 192.168.53.1)
-  --telemetry-fps FPS    Telemetry update rate in Hz (default: 10)
-  --video-fps FPS        Video frame rate (default: 30)
-  --duration SECONDS     Run duration in seconds (default: infinite)
-  -h, --help            Show help message
+  --drone-ip IP            Drone IP address (default: 192.168.53.1)
+  --remote-host IP         Remote host IP to forward data to (required for forwarding)
+  --telemetry-port PORT    UDP port for telemetry (default: 5000)
+  --video-port PORT        UDP/RTP port for video (default: 5004)
+  --telemetry-fps FPS      Telemetry update rate in Hz (default: 10)
+  --video-fps FPS          Video frame rate (default: 30)
+  --duration SECONDS       Run duration in seconds (default: infinite)
+  --max-retries N          Maximum connection retry attempts (default: infinite)
+  --retry-interval SECS    Seconds between connection retries (default: 5)
+  --verbose                Enable verbose SDK logging
+  -h, --help              Show help message
 ```
 
 ### Example Configurations
 
+#### Remote Forwarding (VPN)
+```bash
+# Forward to remote host via VPN
+python ParrotForwarder.py \
+    --remote-host 100.103.235.98 \
+    --telemetry-port 5000 \
+    --video-port 5004
+```
+
 #### Low Bandwidth (VPN-optimized)
 ```bash
-python ParrotForwarder.py --telemetry-fps 5 --video-fps 15
+# Reduce rates for limited bandwidth
+python ParrotForwarder.py \
+    --remote-host 100.103.235.98 \
+    --telemetry-fps 5 \
+    --video-fps 15
 ```
 
 #### High Performance (LAN)
 ```bash
-python ParrotForwarder.py --telemetry-fps 20 --video-fps 30
+# Higher rates for local network
+python ParrotForwarder.py \
+    --remote-host 192.168.1.100 \
+    --telemetry-fps 20 \
+    --video-fps 30
 ```
 
 #### Testing (30 second run)
 ```bash
+# Test run without forwarding
 python ParrotForwarder.py --duration 30
 ```
 
-#### Custom Drone IP
+#### Connection Retry Configuration
 ```bash
-python ParrotForwarder.py --drone-ip 192.168.42.1
+# Retry connection 5 times with 10 second intervals
+python ParrotForwarder.py \
+    --max-retries 5 \
+    --retry-interval 10 \
+    --remote-host 100.103.235.98
 ```
 
 ---
@@ -377,11 +542,21 @@ Performance statistics are logged every 5 seconds:
 
 ```
 drone/
-├── ParrotForwarder.py          # Main application
+├── ParrotForwarder.py          # Main entry point
+├── parrot_forwarder/           # Main package (modular architecture)
+│   ├── __init__.py             # Package initialization
+│   ├── cli.py                  # Command-line interface
+│   ├── main.py                 # ParrotForwarder coordinator
+│   ├── telemetry.py            # TelemetryForwarder class
+│   └── video.py                # VideoForwarder class
+│
 ├── test_drone_connection.py    # Telemetry testing script
 ├── test_video_stream.py        # Video stream testing script
+├── telemetry_receiver.py       # Test receiver for telemetry
 ├── requirements.txt            # Python dependencies
 ├── README.md                   # This file
+├── LICENSE                     # MIT License
+├── .gitignore                  # Git ignore patterns
 │
 ├── drone_env/                  # Python virtual environment
 │   ├── bin/
@@ -396,9 +571,15 @@ drone/
 
 ### Key Files
 
-- **`ParrotForwarder.py`**: Main application with `TelemetryForwarder` and `VideoForwarder` classes
+- **`ParrotForwarder.py`**: Main entry point script
+- **`parrot_forwarder/`**: Modular package with separated concerns:
+  - **`cli.py`**: Command-line argument parsing and main entry point
+  - **`main.py`**: `ParrotForwarder` coordinator class managing connections and lifecycle
+  - **`telemetry.py`**: `TelemetryForwarder` thread for telemetry data
+  - **`video.py`**: `VideoForwarder` thread for video stream
 - **`test_drone_connection.py`**: Standalone telemetry testing and verification
 - **`test_video_stream.py`**: Standalone video streaming test with frame capture
+- **`telemetry_receiver.py`**: Test receiver for verifying telemetry UDP forwarding
 - **`requirements.txt`**: Pinned Python dependencies with versions
 
 ---
