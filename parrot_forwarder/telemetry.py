@@ -166,10 +166,10 @@ class TelemetryForwarder(threading.Thread):
             self.packets_sent += 1
             
             # Log EVERY packet sent for debugging
-            self.logger.info(
-                f"✓ Sent packet #{self.packets_sent} to {self.remote_host}:{self.remote_port} "
-                f"({len(message)} bytes) - Battery: {telemetry.get('battery_percent', 'N/A')}%"
-            )
+            # self.logger.info(
+            #     f"✓ Sent packet #{self.packets_sent} to {self.remote_host}:{self.remote_port} "
+            #     f"({len(message)} bytes) - Battery: {telemetry.get('battery_percent', 'N/A')}%"
+            # )
             
         except BlockingIOError:
             # Socket buffer full - skip this packet (non-blocking socket)

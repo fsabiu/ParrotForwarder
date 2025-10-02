@@ -112,10 +112,19 @@ class ParrotForwarder:
             self.remote_host,
             self.telemetry_port
         )
-        self.video_forwarder = VideoForwarder(self.drone, self.video_fps)
+        self.video_forwarder = VideoForwarder(
+            self.drone, 
+            self.video_fps,
+            self.remote_host,
+            self.video_port
+        )
         
         # Set up video streaming
         self.video_forwarder.setup_streaming()
+        
+        # Wait for video stream to initialize
+        self.logger.info("Waiting for video stream to initialize...")
+        time.sleep(2)
         
         # Start forwarder threads
         self.telemetry_forwarder.start()
@@ -143,9 +152,11 @@ class ParrotForwarder:
         # Stop video streaming
         if self.drone:
             try:
-                self.drone.streaming.stop()
-            except:
-                pass
+                if hasattr(self.drone, 'streaming'):
+                    self.logger.info("Stopping video streaming...")
+                    self.drone.streaming.stop()
+            except Exception as e:
+                self.logger.debug(f"Note: Error stopping stream (may be already stopped): {e}")
         
         self.logger.info("✓ Forwarders stopped")
         
@@ -186,7 +197,9 @@ class ParrotForwarder:
         except KeyboardInterrupt:
             self.logger.info("\n⚠ Shutting down gracefully...")
         except Exception as e:
+            import traceback
             self.logger.error(f"Error: {e}")
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
         
         finally:

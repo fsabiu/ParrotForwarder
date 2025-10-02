@@ -132,7 +132,9 @@ def main():
         logger.info("\n✓ Exited cleanly")
         return 0
     except Exception as e:
+        import traceback
         logger.error(f"Fatal error: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return 1
     
     return 0
