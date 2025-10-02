@@ -178,19 +178,19 @@ def main():
         logger.info("✓ Connected to drone")
         logger.info("-" * 60)
         
-        # Start the UDP forwarding thread
-        stream_sender.start_forwarding()
-        
-        # Start recording to the named pipe
-        logger.info("Starting video recording to pipe...")
-        drone.streaming.start()
-        
-        # Set up recording to pipe in H.264 format
+        # Set up recording to pipe in H.264 format BEFORE starting streaming
+        logger.info("Setting up video recording to pipe...")
         recording = drone.streaming.set_output_files(
             video=pipe_path,
             metadata=None
         )
         
+        # Start the UDP forwarding thread
+        stream_sender.start_forwarding()
+        
+        # Start streaming
+        logger.info("Starting video streaming...")
+        drone.streaming.start()
         drone.streaming.play()
         
         logger.info("✓ H.264 streaming started")
