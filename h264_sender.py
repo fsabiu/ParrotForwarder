@@ -54,24 +54,28 @@ class H264Sender:
             return
         
         try:
-            # Reference the frame
+            # Reference the frame to prevent it from being freed
             h264_frame.ref()
             
-            # Get H.264 frame data
-            frame_data = h264_frame.as_ctypes_pointer()
-            frame_size = h264_frame.vmeta_size if hasattr(h264_frame, 'vmeta_size') else 0
+            # Get the H.264 frame info
+            frame_info = h264_frame.info()
             
-            # Get the actual H.264 data as bytes
-            frame_bytes = bytes(h264_frame)
-            frame_size = len(frame_bytes)
+            # Get H.264 data - access the buffer directly
+            # The frame contains the actual H.264 NAL units
+            frame_array = h264_frame.as_ndarray()
             
-            if frame_size > 0:
+            if frame_array is not None and len(frame_array) > 0:
+                # Convert ndarray to bytes
+                frame_bytes = frame_array.tobytes()
+                frame_size = len(frame_bytes)
+                
                 with self.lock:
                     self.frame_count += 1
                     
                     # Log first frame
                     if self.frame_count == 1:
                         logger.info(f"✓ First H.264 frame received ({frame_size} bytes)")
+                        logger.info(f"  Frame info: {frame_info}")
                     
                     # Send the H.264 frame
                     self._send_frame(frame_bytes)
@@ -91,6 +95,8 @@ class H264Sender:
             
         except Exception as e:
             logger.warning(f"  Could not process/send H.264 frame: {e}")
+            import traceback
+            logger.warning(f"  Traceback: {traceback.format_exc()}")
             try:
                 h264_frame.unref()
             except:
