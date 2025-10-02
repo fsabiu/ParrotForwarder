@@ -25,6 +25,7 @@ import json
 from datetime import datetime
 import cv2
 import numpy as np
+import socket
 
 # Configure logging
 logging.basicConfig(
@@ -40,15 +41,18 @@ class TelemetryForwarder(threading.Thread):
     """
     Handles reading and forwarding telemetry data from the drone.
     Runs in a separate thread and collects telemetry at specified intervals.
+    Forwards telemetry as JSON over UDP.
     """
     
-    def __init__(self, drone, fps=10, name="TelemetryForwarder"):
+    def __init__(self, drone, fps=10, remote_host=None, remote_port=5000, name="TelemetryForwarder"):
         """
         Initialize the telemetry forwarder.
         
         Args:
             drone: Olympe Drone instance
             fps: Frames per second for telemetry updates
+            remote_host: Remote host IP address to send telemetry to
+            remote_port: Remote port for telemetry (default: 5000)
             name: Thread name
         """
         super().__init__(name=name, daemon=True)
@@ -59,12 +63,36 @@ class TelemetryForwarder(threading.Thread):
         self.telemetry_count = 0
         self.logger = logging.getLogger(f"{__name__}.{name}")
         
+        # UDP forwarding configuration
+        self.remote_host = remote_host
+        self.remote_port = remote_port
+        self.udp_socket = None
+        self.forwarding_enabled = remote_host is not None
+        
+        # Debug logging
+        self.logger.info(f"DEBUG: TelemetryForwarder.__init__ - remote_host={remote_host}, remote_port={remote_port}, forwarding_enabled={self.forwarding_enabled}")
+        
+        # Initialize UDP socket if forwarding is enabled
+        if self.forwarding_enabled:
+            try:
+                self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                # Set socket to non-blocking to avoid delays
+                self.udp_socket.setblocking(False)
+                self.logger.info(f"✓ UDP socket initialized - sending to {remote_host}:{remote_port}")
+            except Exception as e:
+                self.logger.error(f"✗ Failed to create UDP socket: {e}")
+                self.forwarding_enabled = False
+        else:
+            self.logger.info("Telemetry forwarding DISABLED (no remote_host specified)")
+        
         # Performance tracking
         self.start_time = None
         self.last_stats_time = None
         self.stats_interval = 5.0  # Report stats every 5 seconds
         self.loop_times = []
         self.max_loop_times = 100  # Keep last 100 loop times for stats
+        self.packets_sent = 0
+        self.send_errors = 0
         
     def get_telemetry_data(self):
         """
@@ -95,6 +123,16 @@ class TelemetryForwarder(threading.Thread):
                 telemetry['latitude'] = position.get('latitude', None)
                 telemetry['longitude'] = position.get('longitude', None)
                 telemetry['altitude'] = position.get('altitude', None)
+                
+                # Debug: log position data on first packet to verify
+                if self.telemetry_count == 1:
+                    self.logger.info(
+                        f"DEBUG: Position data - "
+                        f"GPS fixed: {telemetry.get('gps_fixed', False)}, "
+                        f"Lat: {telemetry.get('latitude')}, "
+                        f"Lon: {telemetry.get('longitude')}, "
+                        f"Alt: {telemetry.get('altitude')}"
+                    )
             
             # Altitude
             altitude = self.drone.get_state(AltitudeChanged)
@@ -127,14 +165,36 @@ class TelemetryForwarder(threading.Thread):
     
     def forward_telemetry(self, telemetry):
         """
-        Forward telemetry data to external system.
-        This is a placeholder - will be implemented later.
+        Forward telemetry data via UDP as JSON.
         
         Args:
             telemetry: Dictionary containing telemetry data
         """
-        # TODO: Implement actual forwarding (UDP, TCP, WebSocket, etc.)
-        pass
+        if not self.forwarding_enabled:
+            self.logger.warning("forward_telemetry called but forwarding is DISABLED")
+            return
+        
+        try:
+            # Serialize telemetry to JSON
+            json_data = json.dumps(telemetry, default=str)  # default=str handles any non-serializable types
+            message = json_data.encode('utf-8')
+            
+            # Send via UDP
+            self.udp_socket.sendto(message, (self.remote_host, self.remote_port))
+            self.packets_sent += 1
+            
+            # Log EVERY packet sent for debugging
+            self.logger.info(
+                f"✓ Sent packet #{self.packets_sent} to {self.remote_host}:{self.remote_port} "
+                f"({len(message)} bytes) - Battery: {telemetry.get('battery_percent', 'N/A')}%"
+            )
+            
+        except BlockingIOError:
+            # Socket buffer full - skip this packet (non-blocking socket)
+            self.logger.warning(f"⚠ BlockingIOError - socket buffer full, packet #{self.packets_sent} skipped")
+        except Exception as e:
+            self.send_errors += 1
+            self.logger.error(f"✗ Error sending packet #{self.packets_sent}: {e}")
     
     def log_performance_stats(self):
         """Log performance statistics."""
@@ -161,12 +221,19 @@ class TelemetryForwarder(threading.Thread):
                 
                 status = "✓" if fps_ratio >= 95 else "⚠" if fps_ratio >= 80 else "✗"
                 
-                self.logger.info(
+                # Build performance message
+                perf_msg = (
                     f"{status} PERFORMANCE: "
                     f"Target={self.fps:.1f} fps, Actual={actual_fps:.2f} fps ({fps_ratio:.1f}%) | "
                     f"Loop: avg={avg_loop_time*1000:.2f}ms, min={min_loop_time*1000:.2f}ms, max={max_loop_time*1000:.2f}ms | "
                     f"Count={self.telemetry_count}"
                 )
+                
+                # Add forwarding stats if enabled
+                if self.forwarding_enabled:
+                    perf_msg += f" | UDP: sent={self.packets_sent}, errors={self.send_errors}"
+                
+                self.logger.info(perf_msg)
                 
                 # Warn if we're falling behind
                 if fps_ratio < 95:
@@ -245,8 +312,16 @@ class TelemetryForwarder(threading.Thread):
             )
     
     def stop(self):
-        """Stop the telemetry forwarder."""
+        """Stop the telemetry forwarder and cleanup resources."""
         self.running = False
+        
+        # Close UDP socket
+        if self.udp_socket:
+            try:
+                self.udp_socket.close()
+                self.logger.info("UDP socket closed")
+            except:
+                pass
 
 
 class VideoForwarder(threading.Thread):
@@ -488,7 +563,8 @@ class ParrotForwarder:
     Manages both telemetry and video forwarding threads.
     """
     
-    def __init__(self, drone_ip, telemetry_fps=10, video_fps=30):
+    def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
+                 remote_host=None, telemetry_port=5000, video_port=5004):
         """
         Initialize the Parrot forwarder.
         
@@ -496,14 +572,24 @@ class ParrotForwarder:
             drone_ip: IP address of the drone
             telemetry_fps: Frames per second for telemetry forwarding
             video_fps: Frames per second for video forwarding
+            remote_host: Remote host IP to forward data to
+            telemetry_port: UDP port for telemetry (default: 5000)
+            video_port: UDP/RTP port for video (default: 5004)
         """
+        self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
+        
         self.drone_ip = drone_ip
         self.telemetry_fps = telemetry_fps
         self.video_fps = video_fps
+        self.remote_host = remote_host
+        self.telemetry_port = telemetry_port
+        self.video_port = video_port
         self.drone = None
         self.telemetry_forwarder = None
         self.video_forwarder = None
-        self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
+        
+        # Debug: log what we received
+        self.logger.info(f"DEBUG: ParrotForwarder init - remote_host={remote_host}, type={type(remote_host)}")
         
     def connect(self):
         """Connect to the drone."""
@@ -525,10 +611,22 @@ class ParrotForwarder:
         self.logger.info(f"  Drone IP: {self.drone_ip}")
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
         self.logger.info(f"  Video FPS: {self.video_fps}")
+        if self.remote_host:
+            self.logger.info(f"  Remote Host: {self.remote_host}")
+            self.logger.info(f"  Telemetry Port: {self.telemetry_port}")
+            self.logger.info(f"  Video Port: {self.video_port}")
+        else:
+            self.logger.info("  Forwarding: DISABLED (no remote host specified)")
         self.logger.info("=" * 60)
         
         # Create forwarders
-        self.telemetry_forwarder = TelemetryForwarder(self.drone, self.telemetry_fps)
+        self.logger.info(f"DEBUG: Creating TelemetryForwarder with remote_host={self.remote_host}, port={self.telemetry_port}")
+        self.telemetry_forwarder = TelemetryForwarder(
+            self.drone, 
+            self.telemetry_fps,
+            self.remote_host,
+            self.telemetry_port
+        )
         self.video_forwarder = VideoForwarder(self.drone, self.video_fps)
         
         # Set up video streaming
@@ -620,6 +718,24 @@ def main():
         help='IP address of the Parrot Anafi drone'
     )
     parser.add_argument(
+        '--remote-host',
+        type=str,
+        default=None,
+        help='Remote host IP address to forward data to (required for forwarding)'
+    )
+    parser.add_argument(
+        '--telemetry-port',
+        type=int,
+        default=5000,
+        help='UDP port for telemetry forwarding'
+    )
+    parser.add_argument(
+        '--video-port',
+        type=int,
+        default=5004,
+        help='UDP/RTP port for video forwarding'
+    )
+    parser.add_argument(
         '--telemetry-fps',
         type=int,
         default=10,
@@ -640,11 +756,21 @@ def main():
     
     args = parser.parse_args()
     
+    # Debug: log parsed arguments
+    logger.info(f"DEBUG: Parsed args - remote_host={args.remote_host}, telemetry_port={args.telemetry_port}")
+    
+    # Validate arguments
+    if args.remote_host is None:
+        logger.warning("No --remote-host specified. Running in monitoring mode (no forwarding).")
+    
     # Create and run forwarder
     forwarder = ParrotForwarder(
         drone_ip=args.drone_ip,
         telemetry_fps=args.telemetry_fps,
-        video_fps=args.video_fps
+        video_fps=args.video_fps,
+        remote_host=args.remote_host,
+        telemetry_port=args.telemetry_port,
+        video_port=args.video_port
     )
     
     forwarder.run(duration=args.duration)
