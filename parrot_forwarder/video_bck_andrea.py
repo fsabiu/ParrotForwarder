@@ -31,7 +31,7 @@ class VideoForwarder(threading.Thread):
             stream_path: Stream path on MediaMTX server (default: parrot_stream)
         """
         super().__init__(daemon=True)
-        #self.drone = drone
+        self.drone = drone
         self.drone_ip = drone_ip
         self.mediamtx_host = mediamtx_host
         self.mediamtx_port = mediamtx_port
@@ -39,41 +39,51 @@ class VideoForwarder(threading.Thread):
         self.rtsp_url = f"rtsp://{mediamtx_host}:{mediamtx_port}/{stream_path}"
         self.ffmpeg_process = None
         self._stop_event = threading.Event()
-        #self._streaming_setup = False
+        self._streaming_setup = False
 
+    def setup_streaming(self):
+        """Set up video streaming from the drone."""
+        if not self._streaming_setup:
+            logger.info("Setting up video streaming...")
+            try:
+                # Start video streaming from drone
+                self.drone.streaming.start()
+                self._streaming_setup = True
+                logger.info("✓ Video streaming setup complete")
+            except Exception as e:
+                logger.error(f"Failed to setup video streaming: {e}")
+                raise
     
     def run(self):
         """Main thread execution - forward video stream to MediaMTX."""
+        if not self._streaming_setup:
+            logger.error("Video streaming not setup. Call setup_streaming() first.")
+            return
         
         # Get the drone's RTSP stream URL
         # The drone typically provides an RTSP stream that we can forward
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
         
-
         cmd = [
             "ffmpeg",
-            
-            # --- INPUT OPTIONS (UDP Fortification) ---
-            # We are NOT using -rtsp_transport tcp here.
-            # Instead, we give ffmpeg bigger buffers to handle UDP packet loss.
-            "-probesize", "5M",         # Analyze up to 5MB of data to find stream info
-            "-analyzeduration", "5M",   # Analyze up to 5 seconds of data
-            "-buffer_size", "10M",      # Increase the input buffer size
-            "-i", drone_rtsp_url,       # Your input stream (will default to UDP)
-            
-            # --- VIDEO PROCESSING OPTIONS (Still critical for cleanup) ---
-            "-c:v", "libx264",          # Re-encode with x264
-            "-preset", "ultrafast",     # Lowest CPU usage to guarantee real-time performance
-            "-tune", "zerolatency",     # Optimize for streaming
-            "-g", "15",                 # Force a keyframe every 15 frames (~0.5s). This will aggressively clean up any visual errors that get through.
-            "-an",                      # Disable audio processing
-            
-            # --- OUTPUT OPTIONS (We STILL use TCP here for reliability) ---
+            "-re",
+            "-an",
+            "-rtsp_transport", "tcp",
+            "-i", drone_rtsp_url,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-tune", "zerolatency",
+            "-profile:v", "baseline", 
+            "-crf", "28",
+            # better efficiency (if your client supports it)
+            "-maxrate", "1000",
+            "-bufsize", "2000",
+            "-g", "30",                   # force I-frame every 0.5s
+            "-keyint_min", "30",
+            "-c:a", "aac",
             "-f", "rtsp",
-            "-rtsp_transport", "tcp",   # Use TCP for the output to MediaMTX. This part is reliable.
             self.rtsp_url
         ]
-
 
         logger.info(f"Starting FFmpeg forwarder: {' '.join(cmd)}")
         
@@ -115,6 +125,13 @@ class VideoForwarder(threading.Thread):
                 logger.warning("FFmpeg did not stop gracefully, killing...")
                 self.ffmpeg_process.kill()
             self.ffmpeg_process = None
+        
+        # Stop drone streaming
+        if self.drone and hasattr(self.drone, 'streaming'):
+            try:
+                self.drone.streaming.stop()
+            except Exception as e:
+                logger.debug(f"Note: Error stopping drone stream: {e}")
         
         logger.info("✓ Video forwarder stopped")
 

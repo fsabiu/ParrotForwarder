@@ -31,7 +31,7 @@ class VideoForwarder(threading.Thread):
             stream_path: Stream path on MediaMTX server (default: parrot_stream)
         """
         super().__init__(daemon=True)
-        #self.drone = drone
+        self.drone = drone
         self.drone_ip = drone_ip
         self.mediamtx_host = mediamtx_host
         self.mediamtx_port = mediamtx_port
@@ -39,41 +39,62 @@ class VideoForwarder(threading.Thread):
         self.rtsp_url = f"rtsp://{mediamtx_host}:{mediamtx_port}/{stream_path}"
         self.ffmpeg_process = None
         self._stop_event = threading.Event()
-        #self._streaming_setup = False
+        self._streaming_setup = False
+        self.re_encode = True
 
+    def setup_streaming(self):
+        """Set up video streaming from the drone."""
+        if not self._streaming_setup:
+            logger.info("Setting up video streaming...")
+            try:
+                # Note: We don't use drone.streaming.start() here because it causes
+                # H264/AVCC format compatibility issues with the Olympe video decoder.
+                # Instead, we use direct RTSP streaming via FFmpeg which handles
+                # the format conversion automatically.
+                self._streaming_setup = True
+                logger.info("✓ Video streaming setup complete (using direct RTSP)")
+            except Exception as e:
+                logger.error(f"Failed to setup video streaming: {e}")
+                raise
     
     def run(self):
         """Main thread execution - forward video stream to MediaMTX."""
+        if not self._streaming_setup:
+            logger.error("Video streaming not setup. Call setup_streaming() first.")
+            return
         
         # Get the drone's RTSP stream URL
         # The drone typically provides an RTSP stream that we can forward
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
         
-
+        # Base command for input
         cmd = [
             "ffmpeg",
-            
-            # --- INPUT OPTIONS (UDP Fortification) ---
-            # We are NOT using -rtsp_transport tcp here.
-            # Instead, we give ffmpeg bigger buffers to handle UDP packet loss.
-            "-probesize", "5M",         # Analyze up to 5MB of data to find stream info
-            "-analyzeduration", "5M",   # Analyze up to 5 seconds of data
-            "-buffer_size", "10M",      # Increase the input buffer size
-            "-i", drone_rtsp_url,       # Your input stream (will default to UDP)
-            
-            # --- VIDEO PROCESSING OPTIONS (Still critical for cleanup) ---
-            "-c:v", "libx264",          # Re-encode with x264
-            "-preset", "ultrafast",     # Lowest CPU usage to guarantee real-time performance
-            "-tune", "zerolatency",     # Optimize for streaming
-            "-g", "15",                 # Force a keyframe every 15 frames (~0.5s). This will aggressively clean up any visual errors that get through.
-            "-an",                      # Disable audio processing
-            
-            # --- OUTPUT OPTIONS (We STILL use TCP here for reliability) ---
-            "-f", "rtsp",
-            "-rtsp_transport", "tcp",   # Use TCP for the output to MediaMTX. This part is reliable.
-            self.rtsp_url
+            "-rtsp_transport", "tcp",  # Use TCP for a more reliable input connection
+            "-i", drone_rtsp_url,
         ]
 
+        if self.re_encode:
+            # Re-encoding command: inserts keyframes for smooth viewing, but uses more CPU.
+            cmd.extend([
+                "-c:v", "libx264",        # Use the H.264 encoder
+                "-preset", "ultrafast",   # Prioritize speed to reduce latency
+                "-tune", "zerolatency",   # Optimize for real-time streaming
+                "-g", "30",               # Insert a keyframe every 30 frames (e.g., every second for 30fps)
+                "-an",                    # No audio
+            ])
+        else:
+            # Original copy command: very low CPU, but inherits keyframe issues from the source.
+            cmd.extend([
+                "-c", "copy",
+            ])
+
+        # Output command
+        cmd.extend([
+            "-f", "rtsp",
+            "-rtsp_transport", "tcp",
+            self.rtsp_url
+        ])
 
         logger.info(f"Starting FFmpeg forwarder: {' '.join(cmd)}")
         
@@ -115,6 +136,9 @@ class VideoForwarder(threading.Thread):
                 logger.warning("FFmpeg did not stop gracefully, killing...")
                 self.ffmpeg_process.kill()
             self.ffmpeg_process = None
+        
+        # Note: We don't need to stop drone streaming since we're using direct RTSP
+        # and not the Olympe streaming API
         
         logger.info("✓ Video forwarder stopped")
 

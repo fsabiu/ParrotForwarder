@@ -145,7 +145,7 @@ class ParrotForwarder:
         )
         
         # Set up video streaming
-        self.video_forwarder.setup_streaming()
+        #self.video_forwarder.setup_streaming()
         
         # Wait for video stream to initialize
         self.logger.info("Waiting for video stream to initialize...")
@@ -161,15 +161,8 @@ class ParrotForwarder:
         """Stop both telemetry and video forwarding."""
         self.logger.info("Stopping forwarders...")
         
-        # Stop video streaming first to stop generating new frames
-        if self.drone:
-            try:
-                if hasattr(self.drone, 'streaming'):
-                    self.logger.info("Stopping video streaming...")
-                    self.drone.streaming.stop()
-                    self.logger.info("✓ Video streaming stopped")
-            except Exception as e:
-                self.logger.debug(f"Note: Error stopping stream (may be already stopped): {e}")
+        # Note: Video streaming is handled directly via RTSP/FFmpeg,
+        # so we don't need to stop the drone's streaming API
         
         # Stop forwarder threads
         if self.telemetry_forwarder:
