@@ -6,6 +6,7 @@ Manages both TelemetryForwarder and VideoForwarder threads.
 
 import logging
 import time
+import signal
 import olympe
 
 from .telemetry import TelemetryForwarder
@@ -47,9 +48,25 @@ class ParrotForwarder:
         self.drone = None
         self.telemetry_forwarder = None
         self.video_forwarder = None
+        self._shutdown_requested = False
         
         # Debug: log what we received
         self.logger.info(f"DEBUG: ParrotForwarder init - remote_host={remote_host}, type={type(remote_host)}")
+        
+        # Set up signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+    
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals gracefully."""
+        if not self._shutdown_requested:
+            self.logger.info(f"\n⚠ Received signal {signum}, initiating graceful shutdown...")
+            self._shutdown_requested = True
+        else:
+            self.logger.warning(f"\n⚠ Force shutdown requested (signal {signum})")
+            # Force exit on second signal
+            import sys
+            sys.exit(1)
         
     def connect(self, max_retries=None, retry_interval=5):
         """
@@ -100,7 +117,7 @@ class ParrotForwarder:
         self.logger.info("Starting Parrot Forwarder")
         self.logger.info(f"  Drone IP: {self.drone_ip}")
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
-        self.logger.info(f"  Video FPS: {self.video_fps}")
+        self.logger.info(f"  Video FPS: {self.video_fps} (streaming at original drone framerate)")
         if self.remote_host:
             self.logger.info(f"  Telemetry Remote Host: {self.remote_host}")
             self.logger.info(f"  Telemetry Port: {self.telemetry_port}")
@@ -121,7 +138,7 @@ class ParrotForwarder:
         )
         self.video_forwarder = VideoForwarder(
             self.drone, 
-            self.video_fps,
+            self.drone_ip,
             self.mediamtx_host,
             self.mediamtx_port,
             self.stream_path
@@ -144,27 +161,33 @@ class ParrotForwarder:
         """Stop both telemetry and video forwarding."""
         self.logger.info("Stopping forwarders...")
         
+        # Stop video streaming first to stop generating new frames
+        if self.drone:
+            try:
+                if hasattr(self.drone, 'streaming'):
+                    self.logger.info("Stopping video streaming...")
+                    self.drone.streaming.stop()
+                    self.logger.info("✓ Video streaming stopped")
+            except Exception as e:
+                self.logger.debug(f"Note: Error stopping stream (may be already stopped): {e}")
+        
+        # Stop forwarder threads
         if self.telemetry_forwarder:
             self.telemetry_forwarder.stop()
         
         if self.video_forwarder:
             self.video_forwarder.stop()
         
-        # Wait for threads to finish
+        # Wait for threads to finish with shorter timeout
         if self.telemetry_forwarder and self.telemetry_forwarder.is_alive():
-            self.telemetry_forwarder.join(timeout=2)
+            self.telemetry_forwarder.join(timeout=1)
+            if self.telemetry_forwarder.is_alive():
+                self.logger.warning("Telemetry forwarder thread did not stop cleanly")
         
         if self.video_forwarder and self.video_forwarder.is_alive():
-            self.video_forwarder.join(timeout=2)
-        
-        # Stop video streaming
-        if self.drone:
-            try:
-                if hasattr(self.drone, 'streaming'):
-                    self.logger.info("Stopping video streaming...")
-                    self.drone.streaming.stop()
-            except Exception as e:
-                self.logger.debug(f"Note: Error stopping stream (may be already stopped): {e}")
+            self.video_forwarder.join(timeout=3)  # Give video forwarder more time for FFmpeg cleanup
+            if self.video_forwarder.is_alive():
+                self.logger.warning("Video forwarder thread did not stop cleanly")
         
         self.logger.info("✓ Forwarders stopped")
         
@@ -193,11 +216,14 @@ class ParrotForwarder:
             
             if duration:
                 self.logger.info(f"Running for {duration} seconds...")
-                time.sleep(duration)
+                for _ in range(duration):
+                    if self._shutdown_requested:
+                        break
+                    time.sleep(1)
             else:
                 self.logger.info("Running indefinitely (Ctrl+C to stop)...")
                 try:
-                    while True:
+                    while not self._shutdown_requested:
                         time.sleep(1)
                 except KeyboardInterrupt:
                     self.logger.info("\n⚠ Interrupted by user")
