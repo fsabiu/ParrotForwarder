@@ -58,8 +58,8 @@ class TelemetryForwarder(threading.Thread):
         if self.forwarding_enabled:
             try:
                 self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                # Set socket to non-blocking to avoid delays
-                self.udp_socket.setblocking(False)
+                # Use blocking socket for reliable delivery
+                self.udp_socket.setblocking(True)
                 self.logger.info(f"✓ UDP socket initialized - sending to {remote_host}:{remote_port}")
             except Exception as e:
                 self.logger.error(f"✗ Failed to create UDP socket: {e}")
@@ -105,16 +105,6 @@ class TelemetryForwarder(threading.Thread):
                 telemetry['latitude'] = position.get('latitude', None)
                 telemetry['longitude'] = position.get('longitude', None)
                 telemetry['altitude'] = position.get('altitude', None)
-                
-                # Debug: log position data on first packet to verify
-                if self.telemetry_count == 1:
-                    self.logger.info(
-                        f"DEBUG: Position data - "
-                        f"GPS fixed: {telemetry.get('gps_fixed', False)}, "
-                        f"Lat: {telemetry.get('latitude')}, "
-                        f"Lon: {telemetry.get('longitude')}, "
-                        f"Alt: {telemetry.get('altitude')}"
-                    )
             
             # Altitude
             altitude = self.drone.get_state(AltitudeChanged)
@@ -160,6 +150,10 @@ class TelemetryForwarder(threading.Thread):
             # Serialize telemetry to JSON
             json_data = json.dumps(telemetry, default=str)  # default=str handles any non-serializable types
             message = json_data.encode('utf-8')
+            
+            # Debug: log first few JSON packets
+            if self.packets_sent < 2:
+                self.logger.info(f"DEBUG: JSON data being sent: {json_data}")
             
             # Send via UDP
             self.udp_socket.sendto(message, (self.remote_host, self.remote_port))
