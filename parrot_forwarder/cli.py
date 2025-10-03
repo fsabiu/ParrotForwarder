@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Parrot Anafi Telemetry and Video Forwarder',
+        description='Parrot Anafi Telemetry and Video Forwarder - Telemetry via UDP, Video via MediaMTX',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -50,10 +50,22 @@ def parse_args():
         help='UDP port for telemetry forwarding'
     )
     parser.add_argument(
-        '--video-port',
+        '--mediamtx-host',
+        type=str,
+        default='localhost',
+        help='MediaMTX server host for video streaming'
+    )
+    parser.add_argument(
+        '--mediamtx-port',
         type=int,
-        default=5004,
-        help='UDP/RTP port for video forwarding'
+        default=8554,
+        help='MediaMTX RTSP port for video streaming'
+    )
+    parser.add_argument(
+        '--stream-path',
+        type=str,
+        default='parrot_stream',
+        help='Stream path on MediaMTX server'
     )
     parser.add_argument(
         '--telemetry-fps',
@@ -109,7 +121,7 @@ def main():
     
     # Validate arguments
     if args.remote_host is None:
-        logger.warning("No --remote-host specified. Running in monitoring mode (no forwarding).")
+        logger.warning("No --remote-host specified. Telemetry forwarding disabled (video will still stream to MediaMTX).")
     
     # Create and run forwarder
     try:
@@ -119,7 +131,9 @@ def main():
             video_fps=args.video_fps,
             remote_host=args.remote_host,
             telemetry_port=args.telemetry_port,
-            video_port=args.video_port
+            mediamtx_host=args.mediamtx_host,
+            mediamtx_port=args.mediamtx_port,
+            stream_path=args.stream_path
         )
         
         forwarder.run(

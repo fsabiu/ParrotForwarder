@@ -19,7 +19,8 @@ class ParrotForwarder:
     """
     
     def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
-                 remote_host=None, telemetry_port=5000, video_port=5004):
+                 remote_host=None, telemetry_port=5000, 
+                 mediamtx_host='localhost', mediamtx_port=8554, stream_path='parrot_stream'):
         """
         Initialize the Parrot forwarder.
         
@@ -27,9 +28,11 @@ class ParrotForwarder:
             drone_ip: IP address of the drone
             telemetry_fps: Frames per second for telemetry forwarding
             video_fps: Frames per second for video forwarding
-            remote_host: Remote host IP to forward data to
+            remote_host: Remote host IP to forward telemetry to
             telemetry_port: UDP port for telemetry (default: 5000)
-            video_port: UDP/RTP port for video (default: 5004)
+            mediamtx_host: MediaMTX server host for video streaming (default: localhost)
+            mediamtx_port: MediaMTX RTSP port (default: 8554)
+            stream_path: Stream path on MediaMTX server (default: parrot_stream)
         """
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
         
@@ -38,7 +41,9 @@ class ParrotForwarder:
         self.video_fps = video_fps
         self.remote_host = remote_host
         self.telemetry_port = telemetry_port
-        self.video_port = video_port
+        self.mediamtx_host = mediamtx_host
+        self.mediamtx_port = mediamtx_port
+        self.stream_path = stream_path
         self.drone = None
         self.telemetry_forwarder = None
         self.video_forwarder = None
@@ -97,11 +102,13 @@ class ParrotForwarder:
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
         self.logger.info(f"  Video FPS: {self.video_fps}")
         if self.remote_host:
-            self.logger.info(f"  Remote Host: {self.remote_host}")
+            self.logger.info(f"  Telemetry Remote Host: {self.remote_host}")
             self.logger.info(f"  Telemetry Port: {self.telemetry_port}")
-            self.logger.info(f"  Video Port: {self.video_port}")
         else:
-            self.logger.info("  Forwarding: DISABLED (no remote host specified)")
+            self.logger.info("  Telemetry Forwarding: DISABLED (no remote host specified)")
+        self.logger.info(f"  MediaMTX Host: {self.mediamtx_host}")
+        self.logger.info(f"  MediaMTX Port: {self.mediamtx_port}")
+        self.logger.info(f"  Stream Path: {self.stream_path}")
         self.logger.info("=" * 60)
         
         # Create forwarders
@@ -115,8 +122,9 @@ class ParrotForwarder:
         self.video_forwarder = VideoForwarder(
             self.drone, 
             self.video_fps,
-            self.remote_host,
-            self.video_port
+            self.mediamtx_host,
+            self.mediamtx_port,
+            self.stream_path
         )
         
         # Set up video streaming

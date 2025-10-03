@@ -1,36 +1,42 @@
 """
-VideoForwarder - Handles H.264 video stream forwarding
+VideoForwarder - Handles H.264 video stream forwarding via MediaMTX
 
-Forwards H.264 encoded video frames directly from the drone over UDP.
-Uses zero-copy forwarding with minimal CPU overhead.
+Forwards H.264 encoded video frames from the drone to MediaMTX server
+using RTSP protocol for distribution to remote clients.
 """
 
 import logging
 import time
 import threading
-import socket
-import struct
+import subprocess
+import os
+import signal
+import tempfile
+import queue
+from datetime import datetime
 
 
 class VideoForwarder(threading.Thread):
     """
-    Handles H.264 video stream forwarding from the drone.
+    Handles H.264 video stream forwarding from the drone to MediaMTX server.
     
-    Receives H.264 encoded frames directly from the drone (no re-encoding)
-    and forwards them over UDP with simple framing protocol.
+    Receives H.264 encoded frames directly from the drone and forwards them
+    to MediaMTX server via RTSP for distribution to remote clients.
     
-    Frame format: [4 bytes: frame_size (big-endian)][H.264 NAL units]
+    Uses FFmpeg to handle the RTSP streaming to MediaMTX.
     """
     
-    def __init__(self, drone, fps=30, remote_host=None, remote_port=5004, name="VideoForwarder"):
+    def __init__(self, drone, fps=30, mediamtx_host='localhost', mediamtx_port=8554, 
+                 stream_path='parrot_stream', name="VideoForwarder"):
         """
         Initialize the video forwarder.
         
         Args:
             drone: Olympe Drone instance
             fps: Target frames per second for video forwarding
-            remote_host: Remote host IP address to send video to
-            remote_port: Remote port for video (default: 5004)
+            mediamtx_host: MediaMTX server host (default: localhost)
+            mediamtx_port: MediaMTX RTSP port (default: 8554)
+            stream_path: Stream path on MediaMTX server (default: parrot_stream)
             name: Thread name
         """
         super().__init__(name=name, daemon=True)
@@ -40,29 +46,21 @@ class VideoForwarder(threading.Thread):
         self.running = False
         self.logger = logging.getLogger(f"{__name__}.{name}")
         
-        # UDP forwarding configuration
-        self.remote_host = remote_host
-        self.remote_port = remote_port
-        self.udp_socket = None
-        self.forwarding_enabled = remote_host is not None
+        # MediaMTX configuration
+        self.mediamtx_host = mediamtx_host
+        self.mediamtx_port = mediamtx_port
+        self.stream_path = stream_path
+        self.rtsp_url = f"rtsp://{mediamtx_host}:{mediamtx_port}/{stream_path}"
         
         # Debug logging
-        self.logger.info(f"DEBUG: VideoForwarder.__init__ - remote_host={remote_host}, remote_port={remote_port}, forwarding_enabled={self.forwarding_enabled}")
+        self.logger.info(f"DEBUG: VideoForwarder.__init__ - mediamtx_host={mediamtx_host}, "
+                        f"mediamtx_port={mediamtx_port}, stream_path={stream_path}")
+        self.logger.info(f"RTSP URL: {self.rtsp_url}")
         
-        # Initialize UDP socket if forwarding is enabled
-        if self.forwarding_enabled:
-            try:
-                self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                # Set socket to non-blocking to avoid delays
-                self.udp_socket.setblocking(False)
-                # Increase socket buffer for video (4MB)
-                self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
-                self.logger.info(f"✓ UDP socket initialized - sending to {remote_host}:{remote_port}")
-            except Exception as e:
-                self.logger.error(f"✗ Failed to create UDP socket: {e}")
-                self.forwarding_enabled = False
-        else:
-            self.logger.info("Video forwarding DISABLED (no remote_host specified)")
+        # FFmpeg process management
+        self.ffmpeg_process = None
+        self.ffmpeg_input_pipe = None
+        self.ffmpeg_ready = False
         
         # Frame tracking
         self.frames_received = 0
@@ -86,12 +84,109 @@ class VideoForwarder(threading.Thread):
         self.frame_sizes = []
         self.max_frame_sizes = 100  # Keep last 100 frame sizes
         
-        # H.264 SPS/PPS caching for late joiners
+        # H.264 SPS/PPS caching for stream initialization
         self.cached_sps_pps = []  # Cache SPS/PPS frames
-        self.last_sps_pps_send = 0  # Last time we sent SPS/PPS
-        self.sps_pps_interval = 5.0  # Resend SPS/PPS every 5 seconds
         self.has_sent_initial_sps_pps = False
         
+        # Frame queue for buffering
+        self.frame_queue = queue.Queue(maxsize=10)  # Small buffer to prevent memory issues
+        
+    def setup_ffmpeg_stream(self):
+        """
+        Set up FFmpeg process to stream to MediaMTX server.
+        
+        Creates a named pipe and FFmpeg process that reads H.264 data
+        and streams it to MediaMTX via RTSP.
+        """
+        try:
+            self.logger.info("Setting up FFmpeg stream to MediaMTX...")
+            
+            # Create a named pipe for H.264 data
+            self.pipe_path = tempfile.mktemp(suffix='.h264')
+            os.mkfifo(self.pipe_path)
+            self.logger.info(f"Created named pipe: {self.pipe_path}")
+            
+            # FFmpeg command to read H.264 from pipe and stream to MediaMTX
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-f', 'h264',           # Input format: raw H.264
+                '-i', self.pipe_path,   # Input: named pipe
+                '-c:v', 'copy',         # Copy video codec (no re-encoding)
+                '-f', 'rtsp',           # Output format: RTSP
+                '-rtsp_transport', 'tcp',  # Use TCP for reliability
+                '-muxdelay', '0.1',     # Reduce muxing delay
+                '-muxpreload', '0.1',   # Reduce muxing preload
+                self.rtsp_url           # Output: MediaMTX RTSP URL
+            ]
+            
+            self.logger.info(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            
+            # Start FFmpeg process
+            self.ffmpeg_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0  # Unbuffered
+            )
+            
+            # Open the named pipe for writing
+            self.ffmpeg_input_pipe = open(self.pipe_path, 'wb')
+            self.ffmpeg_ready = True
+            
+            self.logger.info(f"✓ FFmpeg process started (PID: {self.ffmpeg_process.pid})")
+            self.logger.info(f"✓ Streaming to MediaMTX: {self.rtsp_url}")
+            
+            # Wait a moment for FFmpeg to initialize
+            time.sleep(1)
+            
+        except Exception as e:
+            self.logger.error(f"✗ Failed to setup FFmpeg stream: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            self.cleanup_ffmpeg()
+            raise
+    
+    def cleanup_ffmpeg(self):
+        """Clean up FFmpeg process and resources."""
+        self.ffmpeg_ready = False
+        
+        # Close input pipe
+        if self.ffmpeg_input_pipe:
+            try:
+                self.ffmpeg_input_pipe.close()
+            except:
+                pass
+            self.ffmpeg_input_pipe = None
+        
+        # Terminate FFmpeg process
+        if self.ffmpeg_process:
+            try:
+                # Send SIGTERM first
+                self.ffmpeg_process.terminate()
+                
+                # Wait for graceful shutdown
+                try:
+                    self.ffmpeg_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't stop gracefully
+                    self.ffmpeg_process.kill()
+                    self.ffmpeg_process.wait()
+                
+                self.logger.info("✓ FFmpeg process terminated")
+            except Exception as e:
+                self.logger.warning(f"Error terminating FFmpeg: {e}")
+            finally:
+                self.ffmpeg_process = None
+        
+        # Remove named pipe
+        if hasattr(self, 'pipe_path') and os.path.exists(self.pipe_path):
+            try:
+                os.unlink(self.pipe_path)
+                self.logger.info(f"✓ Removed named pipe: {self.pipe_path}")
+            except Exception as e:
+                self.logger.warning(f"Error removing named pipe: {e}")
+    
     def h264_frame_callback(self, h264_frame):
         """
         Callback for receiving H.264 encoded frames from Olympe.
@@ -103,59 +198,7 @@ class VideoForwarder(threading.Thread):
         self.frames_received += 1
         
         try:
-            # Check frame info for SPS/PPS on first frame
-            if self.frames_received == 1:
-                try:
-                    frame_info = h264_frame.info()
-                    self.logger.info(f"DEBUG: First frame info keys: {list(frame_info.keys())}")
-                    
-                    # Check 'coded' key for codec-specific info
-                    if 'coded' in frame_info:
-                        coded_info = frame_info['coded']
-                        self.logger.info(f"DEBUG: Coded info type: {type(coded_info)}")
-                        if hasattr(coded_info, 'keys'):
-                            self.logger.info(f"DEBUG: Coded info keys: {list(coded_info.keys())}")
-                            
-                            # Check the 'frame' sub-dict
-                            if 'frame' in coded_info:
-                                frame_dict = coded_info['frame']
-                                self.logger.info(f"DEBUG: Frame dict type: {type(frame_dict)}")
-                                if hasattr(frame_dict, 'keys'):
-                                    self.logger.info(f"DEBUG: Frame dict keys: {list(frame_dict.keys())}")
-                                    
-                                    # Check the 'info' sub-dict
-                                    if 'info' in frame_dict:
-                                        info_dict = frame_dict['info']
-                                        self.logger.info(f"DEBUG: Info dict type: {type(info_dict)}")
-                                        if hasattr(info_dict, 'keys'):
-                                            self.logger.info(f"DEBUG: Info dict keys: {list(info_dict.keys())}")
-                                            # Check for sps/pps HERE
-                                            if 'sps' in info_dict:
-                                                sps = info_dict['sps']
-                                                self.logger.info(f"DEBUG: ✓✓✓ FOUND SPS! Type: {type(sps)}, Len: {len(sps) if hasattr(sps, '__len__') else 'N/A'}")
-                                            if 'pps' in info_dict:
-                                                pps = info_dict['pps']  
-                                                self.logger.info(f"DEBUG: ✓✓✓ FOUND PPS! Type: {type(pps)}, Len: {len(pps) if hasattr(pps, '__len__') else 'N/A'}")
-                        else:
-                            self.logger.info(f"DEBUG: Coded info value: {coded_info}")
-                    
-                    # Check 'format' key 
-                    if 'format' in frame_info:
-                        format_info = frame_info['format']
-                        self.logger.info(f"DEBUG: Format info type: {type(format_info)}")
-                        if hasattr(format_info, 'keys'):
-                            self.logger.info(f"DEBUG: Format info keys: {list(format_info.keys())}")
-                        else:
-                            self.logger.info(f"DEBUG: Format info value: {format_info}")
-                            
-                except Exception as e:
-                    self.logger.warning(f"Could not inspect frame info: {e}")
-                    import traceback
-                    self.logger.warning(f"Traceback: {traceback.format_exc()}")
-            
             # Get H.264 data as 1D numpy array (bytes)
-            # Note: Olympe manages the frame lifecycle automatically in callbacks
-            # We should NOT manually ref/unref unless passing to another thread
             h264_data = h264_frame.as_ndarray()
             
             if h264_data is not None and len(h264_data) > 0:
@@ -165,27 +208,23 @@ class VideoForwarder(threading.Thread):
                 frame_size = len(h264_bytes)
                 self.bytes_received += frame_size
                 
-                # Check NAL type BEFORE rate limiting
-                # SPS/PPS must ALWAYS be sent immediately, regardless of FPS
+                # Check NAL type for SPS/PPS handling
                 nal_type = self.get_nal_type(h264_bytes)
                 
-                # Debug: log first 20 frames' NAL types AND first bytes
+                # Debug: log first 20 frames' NAL types
                 if self.frames_received <= 20:
                     nal_type_str = {
                         1: 'P-frame', 5: 'IDR-frame', 6: 'SEI', 
                         7: 'SPS', 8: 'PPS', 9: 'AUD'
                     }.get(nal_type, f'type-{nal_type}' if nal_type else 'unknown')
-                    # Show first 8 bytes in hex
-                    first_bytes = ' '.join(f'{b:02x}' for b in h264_bytes[:8])
-                    self.logger.info(f"DEBUG: Frame #{self.frames_received} - NAL type: {nal_type_str} | Size: {frame_size}B | Start: {first_bytes}")
+                    self.logger.info(f"DEBUG: Frame #{self.frames_received} - NAL type: {nal_type_str} | Size: {frame_size}B")
                 
-                # Forward immediately if it's SPS or PPS
-                if self.forwarding_enabled:
-                    if nal_type in (7, 8):  # SPS or PPS - ALWAYS forward immediately
-                        self.forward_h264_frame(h264_bytes, frame_size)
-                        return
-                    
-                    # For other frames, apply rate limiting
+                # Cache SPS/PPS frames
+                if nal_type in (7, 8):  # SPS or PPS
+                    self.cache_sps_pps(h264_bytes)
+                
+                # Apply rate limiting for non-SPS/PPS frames
+                if nal_type not in (7, 8):  # Not SPS or PPS
                     current_time = time.time()
                     time_since_last = current_time - self.last_forward_time
                     
@@ -194,7 +233,9 @@ class VideoForwarder(threading.Thread):
                         return
                     
                     self.last_forward_time = current_time
-                    self.forward_h264_frame(h264_bytes, frame_size)
+                
+                # Forward frame to FFmpeg
+                self.forward_h264_frame(h264_bytes, frame_size)
             
         except Exception as e:
             self.logger.error(f"Error in H.264 callback: {e}")
@@ -212,10 +253,6 @@ class VideoForwarder(threading.Thread):
             int: NAL unit type (7=SPS, 8=PPS, 5=IDR, 1=P-frame, etc.) or None if invalid
         """
         try:
-            # H.264 NAL units start with 0x00 0x00 0x00 0x01 (4-byte start code)
-            # or 0x00 0x00 0x01 (3-byte start code)
-            # The NAL type is in the first byte after the start code, in bits 0-4
-            
             if len(h264_bytes) < 5:
                 return None
             
@@ -239,22 +276,9 @@ class VideoForwarder(threading.Thread):
             self.logger.debug(f"Error parsing NAL type: {e}")
             return None
     
-    def is_sps_or_pps(self, h264_bytes):
-        """
-        Check if H.264 data contains SPS (7) or PPS (8) NAL units.
-        
-        Args:
-            h264_bytes: bytes containing H.264 data
-            
-        Returns:
-            bool: True if this is SPS or PPS
-        """
-        nal_type = self.get_nal_type(h264_bytes)
-        return nal_type in (7, 8)  # 7=SPS, 8=PPS
-    
     def cache_sps_pps(self, h264_bytes):
         """
-        Cache SPS/PPS frames for resending to late joiners.
+        Cache SPS/PPS frames for stream initialization.
         
         Args:
             h264_bytes: bytes containing H.264 SPS/PPS data
@@ -270,58 +294,43 @@ class VideoForwarder(threading.Thread):
             self.cached_sps_pps.append(h264_bytes)
             self.logger.info(f"✓ Cached PPS (Picture Parameter Set) - {len(h264_bytes)} bytes")
     
-    def send_cached_sps_pps(self):
-        """Send cached SPS/PPS frames to ensure decoder can initialize."""
-        if not self.cached_sps_pps or not self.forwarding_enabled:
+    def send_initial_sps_pps(self):
+        """Send cached SPS/PPS frames to initialize the stream."""
+        if not self.cached_sps_pps or not self.ffmpeg_ready:
             return
         
         try:
             for sps_pps_data in self.cached_sps_pps:
-                self.udp_socket.sendto(sps_pps_data, (self.remote_host, self.remote_port))
+                self.ffmpeg_input_pipe.write(sps_pps_data)
+                self.ffmpeg_input_pipe.flush()
                 self.bytes_sent += len(sps_pps_data)
             
             if not self.has_sent_initial_sps_pps:
-                self.logger.info(f"✓ Sent initial SPS/PPS to {self.remote_host}:{self.remote_port}")
+                self.logger.info(f"✓ Sent initial SPS/PPS to MediaMTX stream")
                 self.has_sent_initial_sps_pps = True
             
-            self.last_sps_pps_send = time.time()
-            
         except Exception as e:
-            self.logger.warning(f"Error sending SPS/PPS: {e}")
+            self.logger.warning(f"Error sending initial SPS/PPS: {e}")
     
     def forward_h264_frame(self, h264_bytes, frame_size):
         """
-        Forward an H.264 frame via UDP with SPS/PPS handling.
-        
-        Handles SPS/PPS caching and periodic resending for late joiners.
+        Forward an H.264 frame to MediaMTX via FFmpeg.
         
         Args:
             h264_bytes: bytes containing H.264 data
             frame_size: size of the frame in bytes
         """
+        if not self.ffmpeg_ready or not self.ffmpeg_input_pipe:
+            return
+        
         try:
-            # Get NAL type for all frames (for debugging)
-            nal_type = self.get_nal_type(h264_bytes)
+            # Send initial SPS/PPS if we haven't yet
+            if not self.has_sent_initial_sps_pps and self.cached_sps_pps:
+                self.send_initial_sps_pps()
             
-            # Check if this is SPS or PPS
-            if nal_type in (7, 8):  # SPS or PPS
-                self.cache_sps_pps(h264_bytes)
-                # Always send SPS/PPS immediately
-                self.udp_socket.sendto(h264_bytes, (self.remote_host, self.remote_port))
-                self.bytes_sent += len(h264_bytes)
-                return
-            
-            # Periodically resend SPS/PPS for late joiners
-            current_time = time.time()
-            if (self.cached_sps_pps and 
-                current_time - self.last_sps_pps_send >= self.sps_pps_interval):
-                self.send_cached_sps_pps()
-            
-            # Send the frame (raw H.264 data) - check socket is still valid
-            if self.udp_socket and self.forwarding_enabled:
-                self.udp_socket.sendto(h264_bytes, (self.remote_host, self.remote_port))
-            else:
-                return  # Socket closed, stop forwarding
+            # Write frame to FFmpeg input pipe
+            self.ffmpeg_input_pipe.write(h264_bytes)
+            self.ffmpeg_input_pipe.flush()
             
             # Track statistics
             self.frames_forwarded += 1
@@ -332,30 +341,24 @@ class VideoForwarder(threading.Thread):
             
             # Log first few frames and every 100th frame for debugging
             if self.frames_forwarded <= 10 or self.frames_forwarded % 100 == 0:
+                nal_type = self.get_nal_type(h264_bytes)
                 nal_type_str = {
-                    1: 'P-frame', 
-                    5: 'IDR-frame', 
-                    6: 'SEI', 
-                    7: 'SPS', 
-                    8: 'PPS',
-                    9: 'AUD'
+                    1: 'P-frame', 5: 'IDR-frame', 6: 'SEI', 
+                    7: 'SPS', 8: 'PPS', 9: 'AUD'
                 }.get(nal_type, f'type-{nal_type}' if nal_type else 'unknown')
                 self.logger.info(
-                    f"✓ Forwarded H.264 frame #{self.frames_forwarded} ({nal_type_str}) to {self.remote_host}:{self.remote_port} "
+                    f"✓ Forwarded H.264 frame #{self.frames_forwarded} ({nal_type_str}) to MediaMTX "
                     f"({frame_size} bytes)"
                 )
             
-        except BlockingIOError:
-            # Socket buffer full - frame dropped
-            self.send_errors += 1
-            if self.send_errors <= 5 or self.send_errors % 100 == 0:
-                self.logger.warning(f"⚠ BlockingIOError - socket buffer full, frame dropped (total: {self.send_errors})")
         except Exception as e:
             self.send_errors += 1
             if self.send_errors <= 5:
-                import traceback
-                self.logger.error(f"✗ Error forwarding frame: {e}")
-                self.logger.error(f"Traceback: {traceback.format_exc()}")
+                self.logger.error(f"✗ Error forwarding frame to MediaMTX: {e}")
+                # Check if FFmpeg process is still running
+                if self.ffmpeg_process and self.ffmpeg_process.poll() is not None:
+                    self.logger.error("FFmpeg process has terminated unexpectedly")
+                    self.cleanup_ffmpeg()
     
     def log_performance_stats(self):
         """Log comprehensive performance statistics."""
@@ -407,13 +410,12 @@ class VideoForwarder(threading.Thread):
                 f"Dropped={self.frames_dropped} frames"
             )
             
-            # Add bandwidth and frame size info if forwarding
-            if self.forwarding_enabled:
-                perf_msg += (
-                    f" | Bandwidth: {bandwidth_mbps:.2f} Mbps | "
-                    f"Frame: avg={avg_frame_size/1024:.1f}KB, min={min_frame_size/1024:.1f}KB, max={max_frame_size/1024:.1f}KB | "
-                    f"UDP: sent={self.frames_forwarded}, errors={self.send_errors}"
-                )
+            # Add bandwidth and frame size info
+            perf_msg += (
+                f" | Bandwidth: {bandwidth_mbps:.2f} Mbps | "
+                f"Frame: avg={avg_frame_size/1024:.1f}KB, min={min_frame_size/1024:.1f}KB, max={max_frame_size/1024:.1f}KB | "
+                f"MediaMTX: sent={self.frames_forwarded}, errors={self.send_errors}"
+            )
             
             self.logger.info(perf_msg)
             
@@ -435,7 +437,7 @@ class VideoForwarder(threading.Thread):
                 error_rate = (self.send_errors / self.frames_forwarded) * 100
                 if error_rate > 1:
                     self.logger.warning(
-                        f"High UDP send error rate: {error_rate:.1f}% ({self.send_errors}/{self.frames_forwarded})"
+                        f"High MediaMTX send error rate: {error_rate:.1f}% ({self.send_errors}/{self.frames_forwarded})"
                     )
             
             self.last_stats_time = current_time
@@ -453,9 +455,13 @@ class VideoForwarder(threading.Thread):
         pass
     
     def setup_streaming(self):
-        """Set up H.264 video streaming callbacks."""
+        """Set up H.264 video streaming callbacks and MediaMTX connection."""
         try:
             self.logger.info("Setting up H.264 video stream callbacks...")
+            
+            # Set up MediaMTX streaming first
+            self.setup_ffmpeg_stream()
+            
             # Use bytestream format (with start codes) for standard H.264
             self.drone.streaming.set_callbacks(
                 h264_bytestream_cb=self.h264_frame_callback,
@@ -463,31 +469,22 @@ class VideoForwarder(threading.Thread):
                 end_cb=self.stop_callback,
                 flush_h264_cb=self.flush_h264_callback
             )
-            self.logger.info("Using H.264 bytestream format (receiver will add SPS/PPS)")
+            self.logger.info("Using H.264 bytestream format")
             self.logger.info("Starting H.264 video stream...")
             self.drone.streaming.start()
-            self.logger.info("✓ H.264 video streaming started - forwarding raw encoded frames")
+            self.logger.info("✓ H.264 video streaming started - forwarding to MediaMTX")
             
-            # Try to get session metadata which might contain SPS/PPS
-            try:
-                import time
-                time.sleep(0.5)  # Wait for stream to initialize
-                session_metadata = self.drone.streaming.get_session_metadata()
-                self.logger.info(f"DEBUG: Session metadata type: {type(session_metadata)}")
-                if session_metadata:
-                    self.logger.info(f"DEBUG: Session metadata keys: {list(session_metadata.keys()) if hasattr(session_metadata, 'keys') else 'N/A'}")
-            except Exception as e:
-                self.logger.info(f"DEBUG: Could not get session metadata: {e}")
-                
         except Exception as e:
             import traceback
             self.logger.error(f"✗ Failed to setup video streaming: {e}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
+            self.cleanup_ffmpeg()
             raise
     
     def run(self):
         """Main thread execution loop for statistics monitoring."""
-        self.logger.info(f"Started - Target FPS: {self.fps} (H.264 bytestream forwarding)")
+        self.logger.info(f"Started - Target FPS: {self.fps} (H.264 MediaMTX forwarding)")
+        self.logger.info(f"Stream URL: {self.rtsp_url}")
         self.running = True
         self.start_time = time.time()
         self.last_stats_time = self.start_time
@@ -499,6 +496,12 @@ class VideoForwarder(threading.Thread):
             try:
                 # Log performance stats periodically
                 self.log_performance_stats()
+                
+                # Check if FFmpeg process is still running
+                if self.ffmpeg_process and self.ffmpeg_process.poll() is not None:
+                    self.logger.error("FFmpeg process terminated unexpectedly")
+                    self.cleanup_ffmpeg()
+                    break
                 
                 # Sleep until next stats interval
                 time.sleep(1)
@@ -519,27 +522,20 @@ class VideoForwarder(threading.Thread):
             fps_ratio = (final_forwarded_fps / self.fps) * 100 if self.fps > 0 else 0
             total_bandwidth = (self.bytes_sent * 8 / total_elapsed / 1_000_000) if total_elapsed > 0 else 0
             
-            if self.forwarding_enabled:
-                self.logger.info(
-                    f"Stopped - Received {self.frames_received} frames ({final_received_fps:.2f} fps) | "
-                    f"Forwarded {self.frames_forwarded} frames ({final_forwarded_fps:.2f} fps, {fps_ratio:.1f}% of target) | "
-                    f"Dropped {self.frames_dropped} frames | "
-                    f"Average bandwidth: {total_bandwidth:.2f} Mbps | "
-                    f"Total data sent: {self.bytes_sent / (1024*1024):.2f} MB"
-                )
-                
-                if self.frames_forwarded > 0:
-                    self.logger.info(f"Final performance: {fps_ratio:.1f}% of target ({self.fps} fps)")
-            else:
-                self.logger.info(f"Stopped - Received {self.frames_received} frames ({final_received_fps:.2f} fps)")
+            self.logger.info(
+                f"Stopped - Received {self.frames_received} frames ({final_received_fps:.2f} fps) | "
+                f"Forwarded {self.frames_forwarded} frames ({final_forwarded_fps:.2f} fps, {fps_ratio:.1f}% of target) | "
+                f"Dropped {self.frames_dropped} frames | "
+                f"Average bandwidth: {total_bandwidth:.2f} Mbps | "
+                f"Total data sent: {self.bytes_sent / (1024*1024):.2f} MB"
+            )
+            
+            if self.frames_forwarded > 0:
+                self.logger.info(f"Final performance: {fps_ratio:.1f}% of target ({self.fps} fps)")
+                self.logger.info(f"Stream available at: {self.rtsp_url}")
     
     def stop(self):
         """Stop the video forwarder and cleanup resources."""
         self.running = False
-        if self.udp_socket:
-            try:
-                self.udp_socket.close()
-                self.logger.info("UDP socket closed")
-            except:
-                pass
+        self.cleanup_ffmpeg()
         self.logger.info("Stopped")

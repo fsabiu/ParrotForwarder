@@ -1,1 +1,0 @@
-python ParrotForwarder.py --drone-ip 192.168.53.1 --telemetry-fps 10 --video-fps 30 --remote-host 100.103.235.98
