@@ -1,0 +1,41 @@
+[Unit]
+Description=ParrotForwarder - Parrot Anafi Telemetry and Video Forwarder
+Documentation=https://github.com/fsabiu/ParrotForwarder
+After=network.target mediamtx.service
+Wants=mediamtx.service
+Requires=network.target
+
+[Service]
+Type=simple
+User=oracle
+Group=oracle
+WorkingDirectory=/home/oracle/ParrotForwarder
+ExecStart=/home/oracle/anaconda3/envs/parrot/bin/python /home/oracle/ParrotForwarder/ParrotForwarder.py --drone-ip 192.168.53.1 --remote-host 100.108.107.4 --telemetry-port 5001
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parrot_forwarder
+
+# Environment variables
+Environment=PYTHONPATH=/home/oracle/ParrotForwarder
+Environment=PYTHONUNBUFFERED=1
+Environment=CONDA_DEFAULT_ENV=parrot
+Environment=CONDA_PREFIX=/home/oracle/anaconda3/envs/parrot
+Environment=CONDA_PYTHON_EXE=/home/oracle/anaconda3/bin/python
+Environment=CONDA_EXE=/home/oracle/anaconda3/bin/conda
+Environment=PATH=/home/oracle/anaconda3/envs/parrot/bin:/home/oracle/anaconda3/bin:/home/oracle/anaconda3/condabin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Security settings (relaxed for conda environment access)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=false
+ProtectHome=false
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
