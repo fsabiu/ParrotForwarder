@@ -51,7 +51,7 @@ class TelemetryForwarder(threading.Thread):
         self.local_klv_port = klv_port
         self.udp_socket = None
         
-        # Initialize UDP socket for KLV forwarding
+        # Initialize UDP socket for KLV forwarding (raw KLV for GStreamer)
         try:
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.udp_socket.setblocking(True)
@@ -181,9 +181,13 @@ class TelemetryForwarder(threading.Thread):
                     f"Yaw={telemetry.get('yaw', 'N/A'):.3f}°"
                 )
             
-            # Send KLV packet via UDP to localhost for FFmpeg
+            # Send raw KLV packet via UDP to localhost for GStreamer
             self.udp_socket.sendto(klv_packet, (self.local_klv_host, self.local_klv_port))
             self.packets_sent += 1
+            
+            # Debug: log first few KLV packets
+            if self.packets_sent <= 3:
+                self.logger.info(f"Sent KLV packet #{self.packets_sent}: {len(klv_packet)} bytes")
             
         except Exception as e:
             self.send_errors += 1

@@ -183,8 +183,9 @@ class ParrotForwarder:
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
         self.logger.info(f"  Telemetry Format: KLV (MISB 0601) -> localhost:{self.klv_port}")
         self.logger.info(f"  Video FPS: {self.video_fps} (streaming at original drone framerate)")
-        self.logger.info(f"  Output: Direct SRT stream on port {self.srt_port}")
+        self.logger.info(f"  Output: Unified SRT stream (video + KLV) on port {self.srt_port}")
         self.logger.info(f"  Client command: ffplay 'srt://<your-ip>:{self.srt_port}'")
+        self.logger.info(f"  NOTE: Using GStreamer for native KLV muxing")
         self.logger.info("=" * 60)
         
         # Create forwarders
@@ -194,7 +195,6 @@ class ParrotForwarder:
             self.klv_port
         )
         self.video_forwarder = VideoForwarder(
-            self.drone, 
             self.drone_ip,
             self.srt_port,
             self.klv_port

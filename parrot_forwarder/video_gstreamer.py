@@ -43,8 +43,9 @@ class VideoForwarder(threading.Thread):
         
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
         
-        # Note: Skipping availability check as GStreamer will handle connection
-        logger.info("Starting GStreamer (will connect to drone RTSP stream)...")
+        # Wait for drone to be ready before starting GStreamer
+        logger.info("Waiting for drone video stream to be available...")
+        self._wait_for_drone_video_ready(drone_rtsp_url)
         
         logger.info(f"Streaming video from {drone_rtsp_url} via SRT")
         logger.info(f"Muxing with KLV data from localhost:{self.klv_port}")

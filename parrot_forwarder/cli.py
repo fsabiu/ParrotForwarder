@@ -92,9 +92,10 @@ def main():
         logging.getLogger('ulog').setLevel(logging.INFO)
         logger.info("Verbose SDK logging enabled")
     
-    logger.info("Telemetry will be encoded as KLV (MISB 0601)")
-    logger.info(f"Video output: Direct SRT stream on port {args.srt_port}")
-    logger.info(f"Client command: ffplay 'srt://<your-ip>:{args.srt_port}'")
+    logger.info("Unified stream: Video (H.264) + Telemetry (KLV/MISB 0601)")
+    logger.info("Using GStreamer for native KLV muxing")
+    logger.info(f"Output: SRT stream on port {args.srt_port}")
+    logger.info(f"Client: ffplay 'srt://<your-ip>:{args.srt_port}'")
     
     # Create and run forwarder
     try:
