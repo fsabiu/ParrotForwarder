@@ -50,27 +50,48 @@ class VideoForwarder(threading.Thread):
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
         
 
+        # cmd = [
+        #     "ffmpeg",
+            
+        #     # --- INPUT OPTIONS (UDP Fortification) ---
+        #     # We are NOT using -rtsp_transport tcp here.
+        #     # Instead, we give ffmpeg bigger buffers to handle UDP packet loss.
+        #     "-probesize", "5M",         # Analyze up to 5MB of data to find stream info
+        #     "-analyzeduration", "5M",   # Analyze up to 5 seconds of data
+        #     "-buffer_size", "10M",      # Increase the input buffer size
+        #     "-i", drone_rtsp_url,       # Your input stream (will default to UDP)
+            
+        #     # --- VIDEO PROCESSING OPTIONS (Still critical for cleanup) ---
+        #     "-c:v", "libx264",          # Re-encode with x264
+        #     "-preset", "ultrafast",     # Lowest CPU usage to guarantee real-time performance
+        #     "-tune", "zerolatency",     # Optimize for streaming
+        #     "-g", "15",                 # Force a keyframe every 15 frames (~0.5s). This will aggressively clean up any visual errors that get through.
+        #     "-an",                      # Disable audio processing
+            
+        #     # --- OUTPUT OPTIONS (We STILL use TCP here for reliability) ---
+        #     "-f", "rtsp",
+        #     "-rtsp_transport", "tcp",   # Use TCP for the output to MediaMTX. This part is reliable.
+        #     self.rtsp_url
+        # ]
+
         cmd = [
             "ffmpeg",
             
-            # --- INPUT OPTIONS (UDP Fortification) ---
-            # We are NOT using -rtsp_transport tcp here.
-            # Instead, we give ffmpeg bigger buffers to handle UDP packet loss.
-            "-probesize", "5M",         # Analyze up to 5MB of data to find stream info
-            "-analyzeduration", "5M",   # Analyze up to 5 seconds of data
-            "-buffer_size", "10M",      # Increase the input buffer size
-            "-i", drone_rtsp_url,       # Your input stream (will default to UDP)
+            # --- INPUT OPTIONS ---
+            "-probesize", "2M",
+            "-analyzeduration", "2M",
+            "-fflags", "nobuffer",      # Drastically reduces input buffer latency
+            "-flags", "low_delay",     # Hint for decoders/demuxers
+            "-rtsp_transport", "udp",  # Explicitly listen via UDP (default, but good to be clear)
+            "-i", drone_rtsp_url,
             
-            # --- VIDEO PROCESSING OPTIONS (Still critical for cleanup) ---
-            "-c:v", "libx264",          # Re-encode with x264
-            "-preset", "ultrafast",     # Lowest CPU usage to guarantee real-time performance
-            "-tune", "zerolatency",     # Optimize for streaming
-            "-g", "15",                 # Force a keyframe every 15 frames (~0.5s). This will aggressively clean up any visual errors that get through.
-            "-an",                      # Disable audio processing
+            # --- VIDEO PROCESSING ---
+            "-c:v", "copy",             # <--- THE MAGIC KEY! Stream copy the video.
+            "-an",                      # Disable audio
             
-            # --- OUTPUT OPTIONS (We STILL use TCP here for reliability) ---
+            # --- OUTPUT OPTIONS ---
             "-f", "rtsp",
-            "-rtsp_transport", "tcp",   # Use TCP for the output to MediaMTX. This part is reliable.
+            "-rtsp_transport", "tcp",   # Use reliable TCP for the output to MediaMTX
             self.rtsp_url
         ]
 
