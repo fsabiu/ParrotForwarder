@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Parrot Anafi Telemetry and Video Forwarder - Telemetry via UDP, Video via MediaMTX',
+        description='Parrot Anafi Telemetry and Video Forwarder - Telemetry as KLV, Video via MediaMTX',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -36,18 +36,6 @@ def parse_args():
         type=str,
         default='192.168.53.1',
         help='IP address of the Parrot Anafi drone'
-    )
-    parser.add_argument(
-        '--remote-host',
-        type=str,
-        default=None,
-        help='Remote host IP address to forward data to (required for forwarding)'
-    )
-    parser.add_argument(
-        '--telemetry-port',
-        type=int,
-        default=5000,
-        help='UDP port for telemetry forwarding'
     )
     parser.add_argument(
         '--mediamtx-host',
@@ -116,12 +104,7 @@ def main():
         logging.getLogger('ulog').setLevel(logging.INFO)
         logger.info("Verbose SDK logging enabled")
     
-    # Debug: log parsed arguments
-    logger.info(f"DEBUG: Parsed args - remote_host={args.remote_host}, telemetry_port={args.telemetry_port}")
-    
-    # Validate arguments
-    if args.remote_host is None:
-        logger.warning("No --remote-host specified. Telemetry forwarding disabled (video will still stream to MediaMTX).")
+    logger.info("Telemetry will be encoded as KLV (MISB 0601) and sent to localhost:12345 for FFmpeg")
     
     # Create and run forwarder
     try:
@@ -129,8 +112,6 @@ def main():
             drone_ip=args.drone_ip,
             telemetry_fps=args.telemetry_fps,
             video_fps=args.video_fps,
-            remote_host=args.remote_host,
-            telemetry_port=args.telemetry_port,
             mediamtx_host=args.mediamtx_host,
             mediamtx_port=args.mediamtx_port,
             stream_path=args.stream_path

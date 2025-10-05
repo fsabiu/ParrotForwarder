@@ -19,7 +19,7 @@ class VideoForwarder(threading.Thread):
     Thread-based video forwarder that streams drone video to MediaMTX server.
     """
     
-    def __init__(self, drone, drone_ip, mediamtx_host="localhost", mediamtx_port=8554, stream_path="parrot_stream"):
+    def __init__(self, drone, drone_ip, mediamtx_host="localhost", mediamtx_port=8554, stream_path="parrot_stream", klv_port=12345):
         """
         Initialize the video forwarder.
         
@@ -29,6 +29,7 @@ class VideoForwarder(threading.Thread):
             mediamtx_host: MediaMTX server host (default: localhost)
             mediamtx_port: MediaMTX RTSP port (default: 8554)
             stream_path: Stream path on MediaMTX server (default: parrot_stream)
+            klv_port: Local UDP port to listen for KLV telemetry data (default: 12345)
         """
         super().__init__(daemon=True)
         #self.drone = drone
@@ -36,6 +37,7 @@ class VideoForwarder(threading.Thread):
         self.mediamtx_host = mediamtx_host
         self.mediamtx_port = mediamtx_port
         self.stream_path = stream_path
+        self.klv_port = klv_port
         self.rtsp_url = f"rtsp://{mediamtx_host}:{mediamtx_port}/{stream_path}"
         self.ffmpeg_process = None
         self._stop_event = threading.Event()

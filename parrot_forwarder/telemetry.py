@@ -1,7 +1,7 @@
 """
 TelemetryForwarder - Handles telemetry data reading and forwarding
 
-Reads drone telemetry at specified FPS and forwards via JSON over UDP.
+Reads drone telemetry at specified FPS and forwards via KLV (MISB 0601) over UDP.
 """
 
 import logging
@@ -10,6 +10,8 @@ import threading
 import json
 import socket
 from datetime import datetime
+
+from .klv_encoder import encode_telemetry_to_klv
 
 from olympe.messages.ardrone3.PilotingState import (
     FlyingStateChanged, PositionChanged, SpeedChanged, 
@@ -23,18 +25,17 @@ class TelemetryForwarder(threading.Thread):
     """
     Handles reading and forwarding telemetry data from the drone.
     Runs in a separate thread and collects telemetry at specified intervals.
-    Forwards telemetry as JSON over UDP.
+    Forwards telemetry as KLV (MISB 0601) over UDP to localhost for FFmpeg to consume.
     """
     
-    def __init__(self, drone, fps=10, remote_host=None, remote_port=5000, name="TelemetryForwarder"):
+    def __init__(self, drone, fps=10, klv_port=12345, name="TelemetryForwarder"):
         """
         Initialize the telemetry forwarder.
         
         Args:
             drone: Olympe Drone instance
             fps: Frames per second for telemetry updates
-            remote_host: Remote host IP address to send telemetry to
-            remote_port: Remote port for telemetry (default: 5000)
+            klv_port: Local UDP port for KLV data (for FFmpeg to consume)
             name: Thread name
         """
         super().__init__(name=name, daemon=True)
@@ -45,27 +46,19 @@ class TelemetryForwarder(threading.Thread):
         self.telemetry_count = 0
         self.logger = logging.getLogger(f"{__name__}.{name}")
         
-        # UDP forwarding configuration
-        self.remote_host = remote_host
-        self.remote_port = remote_port
+        # KLV forwarding configuration - always send to localhost for FFmpeg
+        self.local_klv_host = '127.0.0.1'
+        self.local_klv_port = klv_port
         self.udp_socket = None
-        self.forwarding_enabled = remote_host is not None
         
-        # Debug logging
-        self.logger.info(f"DEBUG: TelemetryForwarder.__init__ - remote_host={remote_host}, remote_port={remote_port}, forwarding_enabled={self.forwarding_enabled}")
-        
-        # Initialize UDP socket if forwarding is enabled
-        if self.forwarding_enabled:
-            try:
-                self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                # Use blocking socket for reliable delivery
-                self.udp_socket.setblocking(True)
-                self.logger.info(f"✓ UDP socket initialized - sending to {remote_host}:{remote_port}")
-            except Exception as e:
-                self.logger.error(f"✗ Failed to create UDP socket: {e}")
-                self.forwarding_enabled = False
-        else:
-            self.logger.info("Telemetry forwarding DISABLED (no remote_host specified)")
+        # Initialize UDP socket for KLV forwarding
+        try:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_socket.setblocking(True)
+            self.logger.info(f"✓ KLV UDP socket initialized - sending to {self.local_klv_host}:{self.local_klv_port}")
+        except Exception as e:
+            self.logger.error(f"✗ Failed to create KLV UDP socket: {e}")
+            self.udp_socket = None
         
         # Performance tracking
         self.start_time = None
@@ -141,40 +134,60 @@ class TelemetryForwarder(threading.Thread):
     
     def forward_telemetry(self, telemetry):
         """
-        Forward telemetry data via UDP as JSON.
+        Forward telemetry data via UDP as KLV (MISB 0601) binary format.
         
         Args:
             telemetry: Dictionary containing telemetry data
         """
-        if not self.forwarding_enabled:
-            self.logger.warning("forward_telemetry called but forwarding is DISABLED")
+        if not self.udp_socket:
             return
         
         try:
-            # Serialize telemetry to JSON
-            json_data = json.dumps(telemetry, default=str)  # default=str handles any non-serializable types
-            message = json_data.encode('utf-8')
+            # Convert ISO timestamp to Unix timestamp in microseconds
+            try:
+                ts_str = telemetry.get('timestamp', datetime.utcnow().isoformat())
+                # Handle both with and without 'Z' suffix
+                ts_str = ts_str.replace('Z', '+00:00')
+                dt = datetime.fromisoformat(ts_str)
+                telemetry['timestamp_us'] = int(dt.timestamp() * 1_000_000)
+            except Exception as e:
+                self.logger.warning(f"Error parsing timestamp: {e}")
+                telemetry['timestamp_us'] = None
             
-            # Debug: log first few JSON packets
+            # Encode telemetry to KLV using our custom encoder
+            klv_packet = encode_telemetry_to_klv(telemetry)
+            
+            if not klv_packet:
+                self.send_errors += 1
+                self.logger.error(f"✗ Failed to encode KLV packet. Telemetry: {telemetry}")
+                return
+            
+            # Debug: log first few KLV packets
             if self.packets_sent < 2:
-                self.logger.info(f"DEBUG: JSON data being sent: {json_data}")
+                gps_status = "GPS FIXED" if telemetry.get('gps_fixed') else "NO GPS (orientation only)"
+                self.logger.info(
+                    f"DEBUG: KLV packet #{self.packets_sent + 1} - "
+                    f"{len(klv_packet)} bytes - {gps_status}"
+                )
+                if telemetry.get('gps_fixed'):
+                    self.logger.info(
+                        f"  GPS: Lat={telemetry.get('latitude', 'N/A')}, "
+                        f"Lon={telemetry.get('longitude', 'N/A')}, "
+                        f"Alt={telemetry.get('altitude', 'N/A')}m"
+                    )
+                self.logger.info(
+                    f"  Orientation: Roll={telemetry.get('roll', 'N/A'):.3f}°, "
+                    f"Pitch={telemetry.get('pitch', 'N/A'):.3f}°, "
+                    f"Yaw={telemetry.get('yaw', 'N/A'):.3f}°"
+                )
             
-            # Send via UDP
-            self.udp_socket.sendto(message, (self.remote_host, self.remote_port))
+            # Send KLV packet via UDP to localhost for FFmpeg
+            self.udp_socket.sendto(klv_packet, (self.local_klv_host, self.local_klv_port))
             self.packets_sent += 1
             
-            # Log EVERY packet sent for debugging
-            # self.logger.info(
-            #     f"✓ Sent packet #{self.packets_sent} to {self.remote_host}:{self.remote_port} "
-            #     f"({len(message)} bytes) - Battery: {telemetry.get('battery_percent', 'N/A')}%"
-            # )
-            
-        except BlockingIOError:
-            # Socket buffer full - skip this packet (non-blocking socket)
-            self.logger.warning(f"⚠ BlockingIOError - socket buffer full, packet #{self.packets_sent} skipped")
         except Exception as e:
             self.send_errors += 1
-            self.logger.error(f"✗ Error sending packet #{self.packets_sent}: {e}")
+            self.logger.error(f"✗ Error encoding or sending KLV packet #{self.packets_sent}: {e}")
     
     def log_performance_stats(self):
         """Log performance statistics."""
@@ -206,12 +219,9 @@ class TelemetryForwarder(threading.Thread):
                     f"{status} PERFORMANCE: "
                     f"Target={self.fps:.1f} fps, Actual={actual_fps:.2f} fps ({fps_ratio:.1f}%) | "
                     f"Loop: avg={avg_loop_time*1000:.2f}ms, min={min_loop_time*1000:.2f}ms, max={max_loop_time*1000:.2f}ms | "
-                    f"Count={self.telemetry_count}"
+                    f"Count={self.telemetry_count} | "
+                    f"KLV: sent={self.packets_sent}, errors={self.send_errors}"
                 )
-                
-                # Add forwarding stats if enabled
-                if self.forwarding_enabled:
-                    perf_msg += f" | UDP: sent={self.packets_sent}, errors={self.send_errors}"
                 
                 self.logger.info(perf_msg)
                 

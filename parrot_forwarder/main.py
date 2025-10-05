@@ -7,6 +7,7 @@ Manages both TelemetryForwarder and VideoForwarder threads.
 import logging
 import time
 import signal
+import socket
 import olympe
 
 from .telemetry import TelemetryForwarder
@@ -20,8 +21,8 @@ class ParrotForwarder:
     """
     
     def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
-                 remote_host=None, telemetry_port=5000, 
-                 mediamtx_host='localhost', mediamtx_port=8554, stream_path='parrot_stream'):
+                 mediamtx_host='localhost', mediamtx_port=8554, stream_path='parrot_stream',
+                 klv_port_start=12345):
         """
         Initialize the Parrot forwarder.
         
@@ -29,19 +30,16 @@ class ParrotForwarder:
             drone_ip: IP address of the drone
             telemetry_fps: Frames per second for telemetry forwarding
             video_fps: Frames per second for video forwarding
-            remote_host: Remote host IP to forward telemetry to
-            telemetry_port: UDP port for telemetry (default: 5000)
             mediamtx_host: MediaMTX server host for video streaming (default: localhost)
             mediamtx_port: MediaMTX RTSP port (default: 8554)
             stream_path: Stream path on MediaMTX server (default: parrot_stream)
+            klv_port_start: Starting port for KLV telemetry (default: 12345, will find next available)
         """
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
         
         self.drone_ip = drone_ip
         self.telemetry_fps = telemetry_fps
         self.video_fps = video_fps
-        self.remote_host = remote_host
-        self.telemetry_port = telemetry_port
         self.mediamtx_host = mediamtx_host
         self.mediamtx_port = mediamtx_port
         self.stream_path = stream_path
@@ -50,8 +48,9 @@ class ParrotForwarder:
         self.video_forwarder = None
         self._shutdown_requested = False
         
-        # Debug: log what we received
-        self.logger.info(f"DEBUG: ParrotForwarder init - remote_host={remote_host}, type={type(remote_host)}")
+        # Find available port for KLV telemetry
+        self.klv_port = self._find_free_port(klv_port_start)
+        self.logger.info(f"KLV telemetry port selected: {self.klv_port}")
         
         # Set up signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -67,6 +66,48 @@ class ParrotForwarder:
             # Force exit on second signal
             import sys
             sys.exit(1)
+    
+    def _is_port_free(self, port):
+        """
+        Check if a UDP port is free.
+        
+        Args:
+            port: Port number to check
+            
+        Returns:
+            bool: True if port is free, False otherwise
+        """
+        try:
+            # Try to bind to the port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(('127.0.0.1', port))
+            sock.close()
+            return True
+        except OSError:
+            return False
+    
+    def _find_free_port(self, start_port, max_attempts=100):
+        """
+        Find a free UDP port starting from start_port.
+        
+        Args:
+            start_port: Starting port number
+            max_attempts: Maximum number of ports to try
+            
+        Returns:
+            int: Free port number
+            
+        Raises:
+            RuntimeError: If no free port found within max_attempts
+        """
+        for offset in range(max_attempts):
+            port = start_port + offset
+            if self._is_port_free(port):
+                if offset > 0:
+                    self.logger.info(f"Port {start_port} was in use, using port {port} instead")
+                return port
+        
+        raise RuntimeError(f"Could not find free port starting from {start_port} after {max_attempts} attempts")
         
     def connect(self, max_retries=None, retry_interval=5):
         """
@@ -145,35 +186,27 @@ class ParrotForwarder:
         self.logger.info("Starting Parrot Forwarder")
         self.logger.info(f"  Drone IP: {self.drone_ip}")
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
+        self.logger.info(f"  Telemetry Format: KLV (MISB 0601) -> localhost:{self.klv_port}")
         self.logger.info(f"  Video FPS: {self.video_fps} (streaming at original drone framerate)")
-        if self.remote_host:
-            self.logger.info(f"  Telemetry Remote Host: {self.remote_host}")
-            self.logger.info(f"  Telemetry Port: {self.telemetry_port}")
-        else:
-            self.logger.info("  Telemetry Forwarding: DISABLED (no remote host specified)")
         self.logger.info(f"  MediaMTX Host: {self.mediamtx_host}")
         self.logger.info(f"  MediaMTX Port: {self.mediamtx_port}")
         self.logger.info(f"  Stream Path: {self.stream_path}")
         self.logger.info("=" * 60)
         
         # Create forwarders
-        self.logger.info(f"DEBUG: Creating TelemetryForwarder with remote_host={self.remote_host}, port={self.telemetry_port}")
         self.telemetry_forwarder = TelemetryForwarder(
             self.drone, 
             self.telemetry_fps,
-            self.remote_host,
-            self.telemetry_port
+            self.klv_port
         )
         self.video_forwarder = VideoForwarder(
             self.drone, 
             self.drone_ip,
             self.mediamtx_host,
             self.mediamtx_port,
-            self.stream_path
+            self.stream_path,
+            self.klv_port
         )
-        
-        # Set up video streaming
-        #self.video_forwarder.setup_streaming()
         
         # Wait for video stream to initialize
         self.logger.info("Waiting for video stream to initialize...")
