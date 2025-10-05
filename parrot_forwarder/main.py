@@ -90,8 +90,8 @@ class ParrotForwarder:
                 
                 if self.drone.connect():
                     self.logger.info("✓ Connected to drone")
-                    # Wait for initial telemetry
-                    time.sleep(1)
+                    # Wait for initial telemetry and verify drone is ready
+                    self._wait_for_drone_ready()
                     return
                 else:
                     self.logger.warning(f"⚠ Connection attempt {attempt} failed")
@@ -110,6 +110,34 @@ class ParrotForwarder:
                 except KeyboardInterrupt:
                     self.logger.info("\n⚠ Retry interrupted by user")
                     raise
+    
+    def _wait_for_drone_ready(self, timeout=30):
+        """
+        Wait for the drone to be ready with telemetry data available.
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+        """
+        self.logger.info("Waiting for drone telemetry to initialize...")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to get basic telemetry to verify drone is ready
+                from olympe.messages.common.CommonState import BatteryStateChanged
+                battery = self.drone.get_state(BatteryStateChanged)
+                
+                if battery is not None:
+                    self.logger.info("✓ Drone telemetry is ready")
+                    return
+                    
+            except Exception as e:
+                # Telemetry not ready yet, continue waiting
+                pass
+            
+            time.sleep(0.5)
+        
+        self.logger.warning("⚠ Drone telemetry initialization timeout - proceeding anyway")
         
     def start_forwarding(self):
         """Start both telemetry and video forwarding."""
@@ -156,6 +184,9 @@ class ParrotForwarder:
         self.video_forwarder.start()
         
         self.logger.info("✓ Both forwarders started")
+        
+        # Give forwarders a moment to initialize
+        time.sleep(1)
         
     def stop_forwarding(self):
         """Stop both telemetry and video forwarding."""

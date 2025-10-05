@@ -49,30 +49,9 @@ class VideoForwarder(threading.Thread):
         # The drone typically provides an RTSP stream that we can forward
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
         
-
-        # cmd = [
-        #     "ffmpeg",
-            
-        #     # --- INPUT OPTIONS (UDP Fortification) ---
-        #     # We are NOT using -rtsp_transport tcp here.
-        #     # Instead, we give ffmpeg bigger buffers to handle UDP packet loss.
-        #     "-probesize", "5M",         # Analyze up to 5MB of data to find stream info
-        #     "-analyzeduration", "5M",   # Analyze up to 5 seconds of data
-        #     "-buffer_size", "10M",      # Increase the input buffer size
-        #     "-i", drone_rtsp_url,       # Your input stream (will default to UDP)
-            
-        #     # --- VIDEO PROCESSING OPTIONS (Still critical for cleanup) ---
-        #     "-c:v", "libx264",          # Re-encode with x264
-        #     "-preset", "ultrafast",     # Lowest CPU usage to guarantee real-time performance
-        #     "-tune", "zerolatency",     # Optimize for streaming
-        #     "-g", "15",                 # Force a keyframe every 15 frames (~0.5s). This will aggressively clean up any visual errors that get through.
-        #     "-an",                      # Disable audio processing
-            
-        #     # --- OUTPUT OPTIONS (We STILL use TCP here for reliability) ---
-        #     "-f", "rtsp",
-        #     "-rtsp_transport", "tcp",   # Use TCP for the output to MediaMTX. This part is reliable.
-        #     self.rtsp_url
-        # ]
+        # Wait for drone to be ready before starting FFmpeg
+        logger.info("Waiting for drone video stream to be available...")
+        self._wait_for_drone_video_ready(drone_rtsp_url)
 
         cmd = [
             "ffmpeg",
@@ -94,7 +73,6 @@ class VideoForwarder(threading.Thread):
             "-rtsp_transport", "tcp",   # Use reliable TCP for the output to MediaMTX
             self.rtsp_url
         ]
-
 
         logger.info(f"Starting FFmpeg forwarder: {' '.join(cmd)}")
         
@@ -121,6 +99,42 @@ class VideoForwarder(threading.Thread):
             logger.error(f"Error in video forwarding: {e}")
         finally:
             self.stop()
+    
+    def _wait_for_drone_video_ready(self, drone_rtsp_url, timeout=30):
+        """
+        Wait for the drone's video stream to be available.
+        
+        Args:
+            drone_rtsp_url: RTSP URL of the drone's video stream
+            timeout: Maximum time to wait in seconds
+        """
+        import socket
+        import urllib.parse
+        
+        # Parse the RTSP URL to get host and port
+        parsed = urllib.parse.urlparse(drone_rtsp_url)
+        host = parsed.hostname
+        port = parsed.port or 554  # Default RTSP port
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to connect to the drone's RTSP port
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                
+                if result == 0:
+                    logger.info("✓ Drone video stream is available")
+                    return
+                    
+            except Exception:
+                pass
+            
+            time.sleep(1)
+        
+        logger.warning("⚠ Drone video stream not available - proceeding anyway")
 
     def stop(self):
         """Stop the video forwarder."""

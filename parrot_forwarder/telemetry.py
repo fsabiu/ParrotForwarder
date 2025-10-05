@@ -131,7 +131,11 @@ class TelemetryForwarder(threading.Thread):
                 telemetry['flying_state'] = flying_state.get('state', None)
             
         except Exception as e:
-            self.logger.error(f"Error getting telemetry: {e}")
+            # Only log error if it's not an uninitialized state (which is expected initially)
+            error_msg = str(e)
+            if "state is uninitialized" not in error_msg:
+                self.logger.error(f"Error getting telemetry: {e}")
+            # For uninitialized states, we just continue with empty telemetry
         
         return telemetry
     
