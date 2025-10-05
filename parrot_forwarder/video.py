@@ -45,38 +45,44 @@ class VideoForwarder(threading.Thread):
 
     
     def run(self):
-        """Main thread execution - forward video stream to MediaMTX."""
+        """Main thread execution - forward video stream and KLV data to MediaMTX."""
         
         # Get the drone's RTSP stream URL
-        # The drone typically provides an RTSP stream that we can forward
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
+        
+        # Local UDP URL where TelemetryForwarder is sending KLV data
+        klv_udp_url = f"udp://127.0.0.1:{self.klv_port}"
         
         # Wait for drone to be ready before starting FFmpeg
         logger.info("Waiting for drone video stream to be available...")
         self._wait_for_drone_video_ready(drone_rtsp_url)
+        
+        logger.info(f"Muxing video from {drone_rtsp_url} with KLV from {klv_udp_url}")
 
+        # TEMPORARY: Test video-only first to verify connectivity
+        # TODO: Add KLV muxing after confirming video works
         cmd = [
             "ffmpeg",
             
             # --- INPUT OPTIONS ---
             "-probesize", "2M",
             "-analyzeduration", "2M",
-            "-fflags", "nobuffer",      # Drastically reduces input buffer latency
-            "-flags", "low_delay",     # Hint for decoders/demuxers
-            "-rtsp_transport", "udp",  # Explicitly listen via UDP (default, but good to be clear)
+            "-fflags", "nobuffer",
+            "-flags", "low_delay",
+            "-rtsp_transport", "udp",
             "-i", drone_rtsp_url,
             
             # --- VIDEO PROCESSING ---
-            "-c:v", "copy",             # <--- THE MAGIC KEY! Stream copy the video.
-            "-an",                      # Disable audio
+            "-c:v", "copy",
+            "-an",
             
             # --- OUTPUT OPTIONS ---
             "-f", "rtsp",
-            "-rtsp_transport", "tcp",   # Use reliable TCP for the output to MediaMTX
+            "-rtsp_transport", "tcp",
             self.rtsp_url
         ]
 
-        logger.info(f"Starting FFmpeg forwarder: {' '.join(cmd)}")
+        logger.info(f"Starting FFmpeg muxer (video + KLV): {' '.join(cmd)}")
         
         try:
             self.ffmpeg_process = subprocess.Popen(
