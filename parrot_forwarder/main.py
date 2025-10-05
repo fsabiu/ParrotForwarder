@@ -177,7 +177,7 @@ class ParrotForwarder:
         
         # Wait for video stream to initialize
         self.logger.info("Waiting for video stream to initialize...")
-        time.sleep(2)
+        time.sleep(1)
         
         # Start forwarder threads
         self.telemetry_forwarder.start()
