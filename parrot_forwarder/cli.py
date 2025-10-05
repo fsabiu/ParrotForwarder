@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Parrot Anafi Telemetry and Video Forwarder - Telemetry as KLV, Video via MediaMTX',
+        description='Parrot Anafi Telemetry and Video Forwarder - Unified SRT stream with KLV metadata',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -38,22 +38,10 @@ def parse_args():
         help='IP address of the Parrot Anafi drone'
     )
     parser.add_argument(
-        '--mediamtx-host',
-        type=str,
-        default='localhost',
-        help='MediaMTX server host for video streaming'
-    )
-    parser.add_argument(
-        '--mediamtx-port',
+        '--srt-port',
         type=int,
-        default=8554,
-        help='MediaMTX RTSP port for video streaming'
-    )
-    parser.add_argument(
-        '--stream-path',
-        type=str,
-        default='parrot_stream',
-        help='Stream path on MediaMTX server'
+        default=8890,
+        help='SRT port for video stream output'
     )
     parser.add_argument(
         '--telemetry-fps',
@@ -104,7 +92,9 @@ def main():
         logging.getLogger('ulog').setLevel(logging.INFO)
         logger.info("Verbose SDK logging enabled")
     
-    logger.info("Telemetry will be encoded as KLV (MISB 0601) and sent to localhost:12345 for FFmpeg")
+    logger.info("Telemetry will be encoded as KLV (MISB 0601)")
+    logger.info(f"Video output: Direct SRT stream on port {args.srt_port}")
+    logger.info(f"Client command: ffplay 'srt://<your-ip>:{args.srt_port}'")
     
     # Create and run forwarder
     try:
@@ -112,9 +102,7 @@ def main():
             drone_ip=args.drone_ip,
             telemetry_fps=args.telemetry_fps,
             video_fps=args.video_fps,
-            mediamtx_host=args.mediamtx_host,
-            mediamtx_port=args.mediamtx_port,
-            stream_path=args.stream_path
+            srt_port=args.srt_port
         )
         
         forwarder.run(

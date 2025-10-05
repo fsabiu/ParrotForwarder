@@ -1,8 +1,7 @@
 [Unit]
 Description=ParrotForwarder - Parrot Anafi Telemetry and Video Forwarder
 Documentation=https://github.com/fsabiu/ParrotForwarder
-After=network.target mediamtx.service
-Wants=mediamtx.service
+After=network.target
 Requires=network.target
 
 [Service]

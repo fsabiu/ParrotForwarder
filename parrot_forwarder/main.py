@@ -21,8 +21,7 @@ class ParrotForwarder:
     """
     
     def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
-                 mediamtx_host='localhost', mediamtx_port=8554, stream_path='parrot_stream',
-                 klv_port_start=12345):
+                 srt_port=8890, klv_port_start=12345):
         """
         Initialize the Parrot forwarder.
         
@@ -30,9 +29,7 @@ class ParrotForwarder:
             drone_ip: IP address of the drone
             telemetry_fps: Frames per second for telemetry forwarding
             video_fps: Frames per second for video forwarding
-            mediamtx_host: MediaMTX server host for video streaming (default: localhost)
-            mediamtx_port: MediaMTX RTSP port (default: 8554)
-            stream_path: Stream path on MediaMTX server (default: parrot_stream)
+            srt_port: SRT port for video stream (default: 8890)
             klv_port_start: Starting port for KLV telemetry (default: 12345, will find next available)
         """
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
@@ -40,9 +37,7 @@ class ParrotForwarder:
         self.drone_ip = drone_ip
         self.telemetry_fps = telemetry_fps
         self.video_fps = video_fps
-        self.mediamtx_host = mediamtx_host
-        self.mediamtx_port = mediamtx_port
-        self.stream_path = stream_path
+        self.srt_port = srt_port
         self.drone = None
         self.telemetry_forwarder = None
         self.video_forwarder = None
@@ -188,9 +183,8 @@ class ParrotForwarder:
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
         self.logger.info(f"  Telemetry Format: KLV (MISB 0601) -> localhost:{self.klv_port}")
         self.logger.info(f"  Video FPS: {self.video_fps} (streaming at original drone framerate)")
-        self.logger.info(f"  MediaMTX Host: {self.mediamtx_host}")
-        self.logger.info(f"  MediaMTX Port: {self.mediamtx_port}")
-        self.logger.info(f"  Stream Path: {self.stream_path}")
+        self.logger.info(f"  Output: Direct SRT stream on port {self.srt_port}")
+        self.logger.info(f"  Client command: ffplay 'srt://<your-ip>:{self.srt_port}'")
         self.logger.info("=" * 60)
         
         # Create forwarders
@@ -202,9 +196,7 @@ class ParrotForwarder:
         self.video_forwarder = VideoForwarder(
             self.drone, 
             self.drone_ip,
-            self.mediamtx_host,
-            self.mediamtx_port,
-            self.stream_path,
+            self.srt_port,
             self.klv_port
         )
         

@@ -19,26 +19,23 @@ class VideoForwarder(threading.Thread):
     Thread-based video forwarder that streams drone video to MediaMTX server.
     """
     
-    def __init__(self, drone, drone_ip, mediamtx_host="localhost", mediamtx_port=8554, stream_path="parrot_stream", klv_port=12345):
+    def __init__(self, drone, drone_ip, srt_port=8890, klv_port=12345):
         """
         Initialize the video forwarder.
         
         Args:
             drone: Olympe drone instance
             drone_ip: IP address of the drone
-            mediamtx_host: MediaMTX server host (default: localhost)
-            mediamtx_port: MediaMTX RTSP port (default: 8554)
-            stream_path: Stream path on MediaMTX server (default: parrot_stream)
+            srt_port: SRT port for direct streaming (default: 8890)
             klv_port: Local UDP port to listen for KLV telemetry data (default: 12345)
         """
         super().__init__(daemon=True)
         #self.drone = drone
         self.drone_ip = drone_ip
-        self.mediamtx_host = mediamtx_host
-        self.mediamtx_port = mediamtx_port
-        self.stream_path = stream_path
+        self.srt_port = srt_port
         self.klv_port = klv_port
-        self.rtsp_url = f"rtsp://{mediamtx_host}:{mediamtx_port}/{stream_path}"
+        # Direct SRT listener - no MediaMTX intermediary
+        self.srt_url = f"srt://0.0.0.0:{srt_port}?mode=listener"
         self.ffmpeg_process = None
         self._stop_event = threading.Event()
         #self._streaming_setup = False
@@ -57,14 +54,14 @@ class VideoForwarder(threading.Thread):
         logger.info("Waiting for drone video stream to be available...")
         self._wait_for_drone_video_ready(drone_rtsp_url)
         
-        logger.info(f"Muxing video from {drone_rtsp_url} with KLV from {klv_udp_url}")
+        logger.info(f"Streaming video from {drone_rtsp_url} via SRT")
+        logger.info(f"NOTE: Testing video-only first, KLV will be added after verification")
 
-        # TEMPORARY: Test video-only first to verify connectivity
-        # TODO: Add KLV muxing after confirming video works
+        # VIDEO-ONLY TEST - Simple SRT output
         cmd = [
             "ffmpeg",
             
-            # --- INPUT OPTIONS ---
+            # --- INPUT: VIDEO FROM DRONE ---
             "-probesize", "2M",
             "-analyzeduration", "2M",
             "-fflags", "nobuffer",
@@ -73,16 +70,21 @@ class VideoForwarder(threading.Thread):
             "-i", drone_rtsp_url,
             
             # --- VIDEO PROCESSING ---
-            "-c:v", "copy",
-            "-an",
+            "-c:v", "copy",            # Copy video without re-encoding
+            "-an",                     # No audio
+            
+            # --- FIX: Force keyframes for better client compatibility ---
+            "-bsf:v", "h264_mp4toannexb",  # Ensure Annex B format for MPEG-TS
             
             # --- OUTPUT OPTIONS ---
-            "-f", "rtsp",
-            "-rtsp_transport", "tcp",
-            self.rtsp_url
+            "-f", "mpegts",            # MPEG-TS format
+            "-muxrate", "10M",         # Limit mux rate
+            "-mpegts_flags", "initial_discontinuity",
+            self.srt_url               # SRT output
         ]
 
-        logger.info(f"Starting FFmpeg muxer (video + KLV): {' '.join(cmd)}")
+        logger.info(f"Starting FFmpeg SRT streamer (video-only): {' '.join(cmd)}")
+        logger.info(f"Stream available at: srt://<your-ip>:{self.srt_port}")
         
         try:
             self.ffmpeg_process = subprocess.Popen(
@@ -92,7 +94,9 @@ class VideoForwarder(threading.Thread):
                 text=True
             )
 
-            logger.info(f"Video forwarding started: {drone_rtsp_url} → {self.rtsp_url}")
+            logger.info(f"✓ SRT stream started on port {self.srt_port}")
+            logger.info(f"  Input: {drone_rtsp_url}")
+            logger.info(f"  Clients can connect: srt://<your-ip>:{self.srt_port}")
 
             # Monitor FFmpeg output
             while not self._stop_event.is_set() and self.ffmpeg_process.poll() is None:
