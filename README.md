@@ -1,10 +1,11 @@
 # ParrotForwarder
 
-**Real-time telemetry and video forwarding from Parrot Anafi drones**
+**Unified video and telemetry streaming from Parrot Anafi drones with synchronized KLV metadata**
 
-A high-performance Python application for capturing and forwarding telemetry data and video streams from Parrot Anafi drones connected via USB to a Raspberry Pi 4. Designed for low-latency remote drone monitoring and control over VPN networks.
+A professional-grade drone streaming system that unifies H.264 video and MISB 0601 KLV telemetry into a single MPEG-TS stream over SRT. Built on Parrot's Olympe SDK and GStreamer, designed for low-latency UAS operations over VPN networks.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![GStreamer 1.14+](https://img.shields.io/badge/GStreamer-1.14+-green.svg)](https://gstreamer.freedesktop.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
@@ -29,69 +30,80 @@ A high-performance Python application for capturing and forwarding telemetry dat
 
 ## Overview
 
-ParrotForwarder is a professional-grade drone telemetry and video forwarding system built on Parrot's Olympe SDK. It provides:
+ParrotForwarder is a professional-grade UAS streaming system that synchronizes video and telemetry into a unified transport stream. It provides:
 
-- **Real-time telemetry streaming** at configurable rates (default: 10 Hz) via JSON over UDP
-- **Video stream forwarding** with precise frame rate control (default: 30 fps)
+- **Synchronized video + telemetry** in single MPEG-TS stream with inherent timestamp alignment
+- **MISB 0601 KLV metadata** encoding for standard-compliant telemetry
+- **H.264 video @ 1280x720, 29.97fps** with no re-encoding (low latency)
+- **SRT streaming** for reliable, low-latency delivery over unreliable networks
 - **USB connectivity** to Parrot Anafi drones via Skycontroller 3
-- **Performance monitoring** with detailed FPS tracking and timing statistics
+- **GStreamer-based muxing** for professional-grade stream composition
 - **Modular architecture** with cleanly separated components and thread-safe operation
-- **Connection retry logic** with graceful error handling and recovery
 
 ### Use Cases
 
-- Remote drone monitoring over VPN
-- Autonomous flight data collection
-- Real-time video analytics
-- Multi-receiver drone telemetry distribution
+- UAS operations requiring synchronized video and telemetry
+- Remote drone monitoring over VPN with MISB-compliant metadata
+- Real-time video analytics with embedded position and attitude data
+- Professional drone recording with standard KLV metadata
 - Research and development with Parrot Anafi platforms
 
 ---
 
 ## Features
 
-### ✅ Telemetry Forwarding
+### ✅ Unified Stream Architecture
 
-- **Comprehensive data collection:**
-  - Battery level and state
-  - GPS position (latitude, longitude, altitude)
-  - Attitude (roll, pitch, yaw)
-  - Speed (3D velocity vector)
-  - Flying state
-  - Altitude above ground level
-- **Configurable update rate** (1-100 Hz)
-- **JSON-formatted** telemetry with timestamps
-- **Thread-safe** operation
+- **Single MPEG-TS stream** containing both video and telemetry data
+- **Inherent synchronization** - video and telemetry timestamps aligned in same transport stream
+- **MISB 0601 KLV metadata** encoding for telemetry (industry standard)
+- **SRT output** for reliable streaming over unreliable networks
+- **No re-encoding** - video copied directly for minimal latency
 
-### ✅ Video Forwarding
+### ✅ Video Stream
 
-- **Live video stream** from Parrot Anafi camera
-- **Automatic YUV to BGR conversion**
-- **Configurable frame rate** (1-60 fps)
-- **Thread-safe frame handling** with latest-frame buffering
-- **Performance-optimized** for VPN transmission
+- **H.264 video @ 1280x720, 29.97fps** from Parrot Anafi camera
+- **Copy mode** (no transcoding) for lowest possible latency
+- **RTSP input** from drone, converted to MPEG-TS
+- **Byte-stream format** with proper AU alignment
+- **GStreamer pipeline** for professional-grade processing
+
+### ✅ Telemetry/KLV Metadata
+
+- **MISB 0601 compliant** KLV encoding
+- **10 Hz update rate** for telemetry
+- **Comprehensive data:**
+  - Unix timestamp (microseconds)
+  - GPS position (latitude, longitude, altitude MSL)
+  - Attitude (roll, pitch, yaw in radians)
+  - Battery level
+  - GPS fix status
+- **Validation and scaling** per MISB 0601 specification
+- **UDP transport** for local KLV→GStreamer communication
 
 ### ✅ Performance Monitoring
 
 - **Real-time FPS tracking** (target vs actual)
+- **Telemetry performance:** 10.0 fps actual, 0 errors
+- **Video performance:** 29.97 fps from drone
 - **Loop timing statistics** (avg, min, max)
 - **Performance indicators** (✓ ≥95%, ⚠ 80-95%, ✗ <80%)
-- **Automatic warnings** for performance degradation
 - **Detailed final statistics** on shutdown
 
 ### ✅ Production-Ready
 
-- **Precise timing control** with drift compensation
+- **systemd service integration** for automatic startup
+- **Dynamic port allocation** for KLV stream
 - **Graceful error handling** and recovery
 - **Comprehensive logging** with configurable levels
-- **Clean shutdown** with Ctrl+C support
-- **Modular design** for easy extension
+- **Clean shutdown** with proper resource cleanup
+- **Modular design** with separation of concerns
 
 ---
 
 ## Architecture
 
-ParrotForwarder uses a **modular, multi-threaded architecture** with clean separation of concerns for maintainability and extensibility:
+ParrotForwarder uses a **unified streaming architecture** that synchronizes video and telemetry into a single MPEG-TS stream with KLV metadata:
 
 ### System Architecture Diagram
 
@@ -99,11 +111,12 @@ ParrotForwarder uses a **modular, multi-threaded architecture** with clean separ
 ┌─────────────────────────────────────────────────────────────┐
 │                    Parrot Anafi Drone                       │
 │                  (via Skycontroller 3)                      │
-└────────────────────┬────────────────────────────────────────┘
-                     │ USB Connection (192.168.53.1)
-                     │ - Olympe SDK Communication
-                     │
-┌────────────────────▼────────────────────────────────────────┐
+└─────────────┬──────────────────────────┬────────────────────┘
+              │ USB (192.168.53.1)       │
+              │ RTSP Video               │ Telemetry via Olympe
+              │ H.264 @ 1280x720         │ (Attitude, GPS, Battery)
+              │                          │
+┌─────────────▼──────────────────────────▼────────────────────┐
 │              Raspberry Pi 4 - ParrotForwarder               │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
@@ -119,8 +132,8 @@ ParrotForwarder uses a **modular, multi-threaded architecture** with clean separ
 │  ├──────────────────────────────────────────────────────┤  │
 │  │  • Drone connection with retry logic                │  │
 │  │  • Thread lifecycle management                       │  │
+│  │  • Dynamic KLV port allocation                       │  │
 │  │  • Graceful shutdown (KeyboardInterrupt)            │  │
-│  │  • Resource cleanup                                  │  │
 │  └────┬──────────────────────────────────────────┬──────┘  │
 │       │                                           │          │
 │  ┌────▼─────────────────────┐   ┌───────────────▼──────┐  │
@@ -128,31 +141,39 @@ ParrotForwarder uses a **modular, multi-threaded architecture** with clean separ
 │  │  (telemetry.py)          │   │   (video.py)         │  │
 │  │  Thread 1                │   │   Thread 2           │  │
 │  ├──────────────────────────┤   ├──────────────────────┤  │
-│  │ • Reads drone state      │   │ • YUV frame callback │  │
-│  │ • Collects telemetry     │   │ • YUV→BGR conversion │  │
-│  │ • Precise 10 Hz timing   │   │ • Frame buffering    │  │
-│  │ • JSON serialization     │   │ • Precise 30 fps     │  │
-│  │ • UDP socket management  │   │ • Performance track  │  │
-│  │ • Performance tracking   │   │ • [Video forwarding] │  │
+│  │ • Reads drone state      │   │ • GStreamer pipeline │  │
+│  │ • Collects telemetry     │   │ • RTSP input (drone) │  │
+│  │ • Encodes to KLV         │   │ • UDP input (KLV)    │  │
+│  │ • MISB 0601 format       │   │ • mpegtsmux          │  │
+│  │ • Precise 10 Hz timing   │   │ • SRT output         │  │
+│  │ • Sends to localhost UDP │   │ • 0:Video + 1:Data   │  │
 │  └────┬─────────────────────┘   └───────────┬──────────┘  │
-│       │ JSON over UDP                       │              │
-│       │ (Non-blocking socket)               │              │
-│       ▼                                      ▼              │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              Forwarding Layer                        │  │
-│  │  Telemetry: ✓ JSON/UDP (Implemented)               │  │
-│  │  Video:     ⏳ H.264/RTP (TODO)                     │  │
+│       │ KLV over UDP (localhost:12345)      │              │
+│       │                                      │              │
+│       └──────────────────┬───────────────────┘              │
+│                          │                                  │
+│  ┌───────────────────────▼──────────────────────────────┐  │
+│  │          GStreamer Muxing Pipeline                   │  │
+│  │                                                       │  │
+│  │  rtspsrc → rtph264depay → h264parse ─┐              │  │
+│  │                                       ├─→ mpegtsmux  │  │
+│  │  udpsrc → meta/x-klv ────────────────┘      │        │  │
+│  │                                              ↓        │  │
+│  │                                           srtsink     │  │
+│  │                                         (port 8890)   │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────┬───────────────────────────────────┘
-                          │ VPN Connection (Tailscale)
-                          │ UDP Packets
+                          │ VPN/Network
+                          │ Single SRT Stream (MPEG-TS)
+                          │ Stream 0: Video (H.264)
+                          │ Stream 1: Data (KLV)
                           ▼
                    ┌──────────────────────┐
-                   │    Remote Host       │
-                   │ telemetry_receiver.py│
-                   │  - UDP listener      │
-                   │  - JSON parser       │
-                   │  - Telemetry display │
+                   │    Remote Client     │
+                   │  (ffplay/VLC/custom) │
+                   │  srt://host:8890     │
+                   │  - Synchronized A/V  │
+                   │  - Embedded metadata │
                    └──────────────────────┘
 ```
 
@@ -162,18 +183,20 @@ The codebase is organized as a Python package with clear separation of concerns:
 
 ```
 parrot_forwarder/
-├── __init__.py          # Package exports (TelemetryForwarder, VideoForwarder, ParrotForwarder)
+├── __init__.py          # Package exports
 ├── cli.py               # Command-line interface, argument parsing, logging setup
 ├── main.py              # ParrotForwarder coordinator class
-├── telemetry.py         # TelemetryForwarder thread (independent telemetry handling)
-└── video.py             # VideoForwarder thread (independent video handling)
+├── telemetry.py         # TelemetryForwarder thread (drone→KLV encoding)
+├── video.py             # VideoForwarder thread (GStreamer muxing pipeline)
+└── klv_encoder.py       # MISB 0601 KLV encoder implementation
 ```
 
 **Benefits of Modular Design:**
 - Each module has a single, well-defined responsibility
-- Easy to test components in isolation
-- Simple to extend (e.g., add new forwarding protocols)
-- Clear dependency hierarchy (CLI → Main → Workers)
+- Custom KLV encoder with MISB 0601 compliance
+- Easy to test components in isolation (e.g., test_klv_receiver.py)
+- Clear dependency hierarchy (CLI → Main → Workers → Encoder)
+- GStreamer integration for professional-grade muxing
 - Enables code reuse (import individual forwarders elsewhere)
 
 ### Thread Communication Model
@@ -184,17 +207,21 @@ Main Thread (ParrotForwarder)
     ├─── Creates ──→ TelemetryForwarder Thread
     │                   │
     │                   ├─ Reads: Olympe drone.get_state()
-    │                   ├─ Writes: UDP socket (non-blocking)
+    │                   ├─ Encodes: JSON → KLV (MISB 0601)
+    │                   ├─ Writes: UDP socket to localhost:12345
     │                   └─ Independent timing loop (10 Hz)
     │
     ├─── Creates ──→ VideoForwarder Thread
     │                   │
-    │                   ├─ Receives: YUV callbacks (Olympe video thread)
-    │                   ├─ Locks: self.lock for frame buffer
-    │                   └─ Independent timing loop (30 fps)
+    │                   ├─ Spawns: GStreamer subprocess
+    │                   ├─ Input 1: RTSP from drone (video)
+    │                   ├─ Input 2: UDP from localhost (KLV)
+    │                   ├─ Mux: mpegtsmux (video+data)
+    │                   └─ Output: SRT stream on port 8890
     │
     └─── Monitors ──→ Graceful shutdown
                         - Calls stop() on both threads
+                        - Terminates GStreamer (SIGINT)
                         - Waits for threads to finish (join)
                         - Closes drone connection
 ```
@@ -240,26 +267,52 @@ Main Thread (ParrotForwarder)
 
 ### Data Flow
 
-**Telemetry Path:**
+**Unified Stream Path:**
 ```
-Drone State → get_state() → Telemetry Dict → JSON → UDP Socket → Remote Host
-   (Olympe)     (10 Hz)      (Python)      (bytes)   (network)    (Receiver)
-```
-
-**Video Path (Current):**
-```
-Drone Camera → YUV Callback → BGR Conversion → Frame Buffer → [TODO: Encode → UDP/RTP]
-   (H.264)      (Olympe)        (OpenCV)         (numpy)         (GStreamer)
+┌─ Telemetry ─────────────────────────────────────┐
+│ Drone State → get_state() → KLV Encoder →       │
+│  (Olympe)      (10 Hz)       (MISB 0601)        │
+│                                   ↓              │
+│                              UDP localhost:12345 │
+└──────────────────────────────────┼──────────────┘
+                                   │
+                                   ↓
+                          ┌─── GStreamer ───┐
+                          │   mpegtsmux     │
+                          │  (synchronize)  │
+                          └────────┬────────┘
+                                   ↑
+┌─ Video ────────────────────────┼────────────────┐
+│ Drone Camera → RTSP Stream → rtph264depay →     │
+│   (H.264)    (192.168.53.1)   h264parse         │
+│               1280x720@30                        │
+└──────────────────────────────────────────────────┘
+                                   │
+                                   ↓
+                          ┌─── MPEG-TS ────┐
+                          │ Stream 0: Video │
+                          │ Stream 1: Data  │
+                          └────────┬────────┘
+                                   │
+                                   ↓
+                            SRT Output
+                        (port 8890, listener)
+                                   │
+                                   ↓
+                          Remote Client(s)
 ```
 
 ### Performance Characteristics
 
 | Component | Target | Typical Performance | Notes |
 |-----------|--------|---------------------|-------|
-| Telemetry Thread | 10 Hz | 10.01-10.04 Hz (100%+) | Consistently meets target |
-| Video Thread | 30 fps | 28-30 fps (95-100%) | Limited by drone output |
-| Loop Overhead | <1ms | 0.05-0.10ms avg | Minimal CPU usage |
-| Connection Retry | Configurable | 5s default | Non-blocking for other operations |
+| Telemetry Thread | 10 Hz | 10.0 Hz (100%) | KLV encoding @ 10 fps, 0 errors |
+| Video Stream | 29.97 fps | 29.97 fps | H.264 from drone, no transcoding |
+| Unified Stream | N/A | Video + Data | Both streams synchronized in MPEG-TS |
+| KLV Encoding | <1ms | ~0.1ms per packet | MISB 0601 encoding overhead |
+| GStreamer Latency | 200ms | Configurable | Set in pipeline parameters |
+| SRT Latency | 200ms | Configurable | Set in srtsink parameters |
+| Total End-to-End | ~400ms | Video + KLV synchronized | Suitable for monitoring applications |
 
 ### Error Handling Strategy
 
@@ -289,21 +342,28 @@ This layered approach ensures that errors at any level are handled appropriately
 
 ### Hardware
 
-- **Raspberry Pi 4** (2GB+ RAM recommended)
+- **Raspberry Pi 4** (2GB+ RAM recommended, 4GB preferred)
 - **Parrot Anafi** drone with Skycontroller 3
 - **USB connection** between Raspberry Pi and Skycontroller
 - **Network connection** for VPN (WiFi or Ethernet)
 
 ### Software
 
-- **Operating System**: Raspberry Pi OS (Debian-based)
+- **Operating System**: Raspberry Pi OS (Debian-based) or Ubuntu
 - **Python**: 3.11.x (tested on 3.11.2)
+- **GStreamer**: 1.14+ (system installation via apt, not Anaconda)
+  - Core: `gstreamer1.0-tools`, `gstreamer1.0-plugins-base`
+  - Plugins: `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`
+  - Required: `mpegtsmux`, `srtsink`, `rtspsrc` elements
 - **Network**: USB interface at `192.168.53.1` (auto-configured by Skycontroller)
 
 ### Network Requirements
 
-- Stable VPN connection for remote forwarding
-- Recommended bandwidth: 3-10 Mbps (depends on video FPS and encoding)
+- Stable VPN connection for remote streaming (Tailscale recommended)
+- Recommended bandwidth: 2-5 Mbps for unified stream
+  - Video: H.264 @ 1280x720, ~2-4 Mbps
+  - KLV metadata: ~10 packets/sec, minimal bandwidth (<1 Kbps)
+- SRT provides error correction over unreliable networks
 
 ---
 
@@ -316,7 +376,7 @@ This layered approach ensures that errors at any level are handled appropriately
 sudo apt-get update
 sudo apt-get upgrade
 
-# Install required system packages
+# Install Python and basic dependencies
 sudo apt-get install -y \
     python3.11 \
     python3.11-venv \
@@ -325,7 +385,23 @@ sudo apt-get install -y \
     libsdl2-2.0-0 \
     libjpeg-dev \
     libopencv-dev
+
+# Install GStreamer
+sudo apt-get install -y \
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    gstreamer1.0-rtsp
+
+# Verify GStreamer installation
+gst-inspect-1.0 mpegtsmux  # Should show mpegtsmux element
+gst-inspect-1.0 srtsink    # Should show srtsink element
 ```
+
+**Important**: Make sure you're using the system GStreamer (`/usr/bin/gst-launch-1.0`), not an Anaconda/Conda version which may be outdated.
 
 ### 2. Clone Repository
 
@@ -373,9 +449,11 @@ python test_video_stream.py
 # Activate virtual environment
 source drone_env/bin/activate
 
-# Run with default settings (telemetry: 10 Hz, video: 30 fps)
+# Run with default settings (SRT output on port 8890)
 python ParrotForwarder.py
 ```
+
+The unified stream will be available at `srt://<raspberry-pi-ip>:8890`
 
 ### Command-Line Options
 
@@ -384,50 +462,56 @@ python ParrotForwarder.py [OPTIONS]
 
 Options:
   --drone-ip IP            Drone IP address (default: 192.168.53.1)
-  --remote-host IP         Remote host IP to forward data to (required for forwarding)
-  --telemetry-port PORT    UDP port for telemetry (default: 5000)
-  --video-port PORT        UDP/RTP port for video (default: 5004)
-  --telemetry-fps FPS      Telemetry update rate in Hz (default: 10)
-  --video-fps FPS          Video frame rate (default: 30)
+  --srt-port PORT          SRT output port (default: 8890)
+  --telemetry-fps FPS      Telemetry/KLV update rate in Hz (default: 10)
   --duration SECONDS       Run duration in seconds (default: infinite)
   --max-retries N          Maximum connection retry attempts (default: infinite)
   --retry-interval SECS    Seconds between connection retries (default: 5)
   --verbose                Enable verbose SDK logging
-  -h, --help              Show help message
+  -h, --help               Show help message
+```
+
+### Viewing the Stream
+
+#### Using ffplay (FFmpeg)
+```bash
+# Basic playback with low latency
+ffplay -fflags nobuffer -flags low_delay srt://<raspberry-pi-ip>:8890
+
+# View video only
+ffplay -fflags nobuffer -flags low_delay srt://100.105.188.84:8890
+
+# View stream info (shows both video and KLV data streams)
+ffprobe srt://100.105.188.84:8890
+```
+
+#### Recording the Stream
+```bash
+# Record 10 seconds of unified stream (video + KLV)
+ffmpeg -i srt://100.105.188.84:8890 -c copy -map 0:v -map 0:d -t 10 recording.ts
+
+# Extract KLV metadata from recorded file
+ffmpeg -i recording.ts -map 0:d -c copy -f data klv_data.bin
 ```
 
 ### Example Configurations
 
-#### Remote Forwarding (VPN)
+#### Standard Operation (Production)
 ```bash
-# Forward to remote host via VPN
-python ParrotForwarder.py \
-    --remote-host 100.103.235.98 \
-    --telemetry-port 5000 \
-    --video-port 5004
+# Run as systemd service (automatic startup)
+sudo systemctl start parrot_forwarder
+sudo journalctl -u parrot_forwarder -f  # View logs
 ```
 
-#### Low Bandwidth (VPN-optimized)
+#### Custom SRT Port
 ```bash
-# Reduce rates for limited bandwidth
-python ParrotForwarder.py \
-    --remote-host 100.103.235.98 \
-    --telemetry-fps 5 \
-    --video-fps 15
-```
-
-#### High Performance (LAN)
-```bash
-# Higher rates for local network
-python ParrotForwarder.py \
-    --remote-host 192.168.1.100 \
-    --telemetry-fps 20 \
-    --video-fps 30
+# Use different SRT port
+python ParrotForwarder.py --srt-port 9000
 ```
 
 #### Testing (30 second run)
 ```bash
-# Test run without forwarding
+# Test run with automatic shutdown
 python ParrotForwarder.py --duration 30
 ```
 
@@ -436,64 +520,75 @@ python ParrotForwarder.py --duration 30
 # Retry connection 5 times with 10 second intervals
 python ParrotForwarder.py \
     --max-retries 5 \
-    --retry-interval 10 \
-    --remote-host 100.103.235.98
+    --retry-interval 10
 ```
 
 ---
 
 ## Configuration
 
-### Telemetry Data Fields
+### KLV Telemetry Data Fields
 
-The telemetry forwarder collects the following data at each interval:
+The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 
-| Field | Type | Description | Units |
-|-------|------|-------------|-------|
-| `timestamp` | string | UTC timestamp (ISO 8601) | - |
-| `sequence` | int | Sequential packet number | - |
-| `battery_percent` | int | Battery level | % |
-| `gps_fixed` | bool | GPS fix status | - |
-| `latitude` | float | GPS latitude | degrees |
-| `longitude` | float | GPS longitude | degrees |
-| `altitude` | float | GPS altitude (MSL) | meters |
-| `altitude_agl` | float | Altitude above ground | meters |
-| `roll` | float | Roll angle | radians |
-| `pitch` | float | Pitch angle | radians |
-| `yaw` | float | Yaw angle | radians |
-| `speed_x` | float | Velocity X (North) | m/s |
-| `speed_y` | float | Velocity Y (East) | m/s |
-| `speed_z` | float | Velocity Z (Down) | m/s |
-| `flying_state` | string | Current flying state | enum |
+| MISB 0601 Tag | Field | Type | Description | Encoding |
+|---------------|-------|------|-------------|----------|
+| Tag 2 | `timestamp` | uint64 | Unix timestamp | Microseconds since epoch |
+| Tag 13 | `latitude` | int32 | Sensor latitude | Degrees × 10^7, range ±90° |
+| Tag 14 | `longitude` | int32 | Sensor longitude | Degrees × 10^7, range ±180° |
+| Tag 15 | `altitude` | uint16 | Sensor altitude MSL | Meters, 0-19,900m range |
+| Tag 5 | `roll` | int16 | Platform roll | Degrees × 100, range ±180° |
+| Tag 6 | `pitch` | int16 | Platform pitch | Degrees × 100, range ±90° |
+| Tag 7 | `yaw` | uint16 | Platform heading | Degrees × 100, 0-360° |
+
+**Additional drone data collected (not in KLV stream):**
+- Battery level (%)
+- GPS fix status
+- Flying state
+- Altitude AGL
+- Speed vector (x, y, z)
+
+**KLV Packet Structure:**
+- Universal Label: `06 0E 2B 34 02 0B 01 01 0E 01 03 01 01 00 00 00`
+- Length: Variable (BER encoding)
+- Data: TLV-encoded fields per MISB 0601
 
 ### Performance Tuning
 
-#### For VPN Transmission (Bandwidth-Limited)
+#### GStreamer Latency Configuration
 
-```bash
-# Reduce both rates
-python ParrotForwarder.py --telemetry-fps 5 --video-fps 15
+The default latency is 200ms for both RTSP input and SRT output. To adjust:
+
+Edit `parrot_forwarder/video.py` and modify the pipeline:
+```python
+# Reduce latency (may cause stuttering on poor networks)
+"rtspsrc ... latency=100 ! ... srtsink ... latency=100"
+
+# Increase latency (smoother playback on poor networks)
+"rtspsrc ... latency=500 ! ... srtsink ... latency=500"
 ```
 
-**Expected bandwidth**: 1-3 Mbps (with H.264 encoding)
-
-#### For Local Development (Low Latency)
+#### KLV Update Rate
 
 ```bash
-# Higher rates for responsive testing
-python ParrotForwarder.py --telemetry-fps 20 --video-fps 30
+# Lower rate for bandwidth-constrained networks
+python ParrotForwarder.py --telemetry-fps 5
+
+# Higher rate for more frequent telemetry updates
+python ParrotForwarder.py --telemetry-fps 20
 ```
 
-**Expected bandwidth**: 3-8 Mbps (with H.264 encoding)
+**Note**: Video rate (29.97 fps) is fixed by the drone and cannot be changed.
 
-#### For Monitoring Only (Minimal Bandwidth)
+#### Expected Bandwidth
 
-```bash
-# Very low rates for basic monitoring
-python ParrotForwarder.py --telemetry-fps 2 --video-fps 5
-```
+| Configuration | Video | KLV | Total | Use Case |
+|---------------|-------|-----|-------|----------|
+| Standard | 2-4 Mbps | <1 Kbps | 2-4 Mbps | Normal operations |
+| Over VPN | 2-4 Mbps | <1 Kbps | 2-4 Mbps | Tailscale/WireGuard |
+| Poor network | 2-4 Mbps | <1 Kbps | 2-4 Mbps | SRT handles packet loss |
 
-**Expected bandwidth**: 0.5-1 Mbps
+SRT protocol provides Forward Error Correction and automatic retransmission, making it suitable for unreliable networks.
 
 ---
 
@@ -505,13 +600,21 @@ On Raspberry Pi 4 (4GB), with default settings:
 
 ```
 Telemetry Forwarder:
-  ✓ Target: 10.0 fps, Actual: 10.01-10.04 fps (100.1-100.4%)
-  Loop time: avg=0.10ms, min=0.07ms, max=0.50ms
+  ✓ Target: 10.0 fps, Actual: 10.0 fps (100.0%)
+  KLV packets sent: 600 (10/sec)
+  Errors: 0
+  Loop time: avg=0.08ms, min=0.05ms, max=0.15ms
 
-Video Forwarder:
-  ✓ Target: 30.0 fps, Forwarded: 28.5-29.8 fps (95-99%)
-  Incoming: 30.0-30.2 fps from drone
-  Loop time: avg=0.05ms, min=0.01ms, max=0.85ms
+Video Forwarder (GStreamer):
+  ✓ Input: RTSP from drone @ 29.97 fps
+  ✓ Output: MPEG-TS over SRT @ 29.97 fps
+  ✓ KLV muxed: 10 packets/sec
+  Status: Running, no errors
+
+Unified Stream:
+  ✓ Stream 0: Video (H.264) - 1280x720 @ 29.97 fps
+  ✓ Stream 1: Data (KLV) - MISB 0601 @ 10 Hz
+  ✓ Synchronization: Inherent via MPEG-TS timestamps
 ```
 
 ### Performance Indicators
@@ -525,15 +628,17 @@ Video Forwarder:
 Performance statistics are logged every 5 seconds:
 
 ```
-[15:13:53] INFO - TelemetryForwarder - ✓ PERFORMANCE: 
-    Target=10.0 fps, Actual=10.04 fps (100.4%) | 
-    Loop: avg=0.10ms, min=0.07ms, max=0.27ms | 
-    Count=253
+[21:32:05] INFO - TelemetryForwarder - ✓ PERFORMANCE: 
+    Target=10.0 fps, Actual=10.0 fps (100.0%) | 
+    Loop: avg=0.08ms, min=0.05ms, max=0.15ms | 
+    KLV packets sent: 50, Errors: 0
 
-[15:13:53] INFO - VideoForwarder - ✓ PERFORMANCE: 
-    Target=30.0 fps, Forwarded=28.65 fps (95.5%) | 
-    Incoming=30.2 fps, Received=719 | 
-    Loop: avg=0.05ms, min=0.01ms, max=0.85ms
+[21:32:05] INFO - VideoForwarder - ✓ GStreamer pipeline running
+    Input: rtsp://192.168.53.1/live
+    Output: srt://0.0.0.0:8890 (MPEG-TS with KLV)
+
+# View logs in real-time
+sudo journalctl -u parrot_forwarder -f
 ```
 
 ---
@@ -541,32 +646,27 @@ Performance statistics are logged every 5 seconds:
 ## Project Structure
 
 ```
-drone/
-├── ParrotForwarder.py          # Main entry point
-├── parrot_forwarder/           # Main package (modular architecture)
-│   ├── __init__.py             # Package initialization
-│   ├── cli.py                  # Command-line interface
-│   ├── main.py                 # ParrotForwarder coordinator
-│   ├── telemetry.py            # TelemetryForwarder class
-│   └── video.py                # VideoForwarder class
+ParrotForwarder/
+├── ParrotForwarder.py              # Main entry point
+├── parrot_forwarder/               # Main package (modular architecture)
+│   ├── __init__.py                 # Package initialization
+│   ├── cli.py                      # Command-line interface
+│   ├── main.py                     # ParrotForwarder coordinator
+│   ├── telemetry.py                # TelemetryForwarder (JSON→KLV encoding)
+│   ├── video.py                    # VideoForwarder (GStreamer pipeline)
+│   └── klv_encoder.py              # MISB 0601 KLV encoder
 │
-├── test_drone_connection.py    # Telemetry testing script
-├── test_video_stream.py        # Video stream testing script
-├── telemetry_receiver.py       # Test receiver for telemetry
-├── requirements.txt            # Python dependencies
-├── README.md                   # This file
-├── LICENSE                     # MIT License
-├── .gitignore                  # Git ignore patterns
+├── tests/                          # Testing utilities
+│   ├── test_drone_connection.py    # Telemetry testing script
+│   ├── test_video_stream.py        # Video stream testing script
+│   └── test_klv_receiver.py        # KLV packet decoder/viewer
 │
-├── drone_env/                  # Python virtual environment
-│   ├── bin/
-│   ├── lib/
-│   └── ...
-│
-└── video_frames/               # Sample video frames (testing)
-    ├── frame_001.jpg
-    ├── frame_002.jpg
-    └── ...
+├── parrot_forwarder.service        # systemd service file
+├── requirements.txt                # Python dependencies
+├── GSTREAMER_SETUP.md             # GStreamer installation guide
+├── README.md                       # This file
+├── LICENSE                         # MIT License
+└── .gitignore                      # Git ignore patterns
 ```
 
 ### Key Files
@@ -575,11 +675,12 @@ drone/
 - **`parrot_forwarder/`**: Modular package with separated concerns:
   - **`cli.py`**: Command-line argument parsing and main entry point
   - **`main.py`**: `ParrotForwarder` coordinator class managing connections and lifecycle
-  - **`telemetry.py`**: `TelemetryForwarder` thread for telemetry data
-  - **`video.py`**: `VideoForwarder` thread for video stream
-- **`test_drone_connection.py`**: Standalone telemetry testing and verification
-- **`test_video_stream.py`**: Standalone video streaming test with frame capture
-- **`telemetry_receiver.py`**: Test receiver for verifying telemetry UDP forwarding
+  - **`telemetry.py`**: `TelemetryForwarder` thread for KLV encoding and UDP transmission
+  - **`video.py`**: `VideoForwarder` thread managing GStreamer muxing pipeline
+  - **`klv_encoder.py`**: Custom MISB 0601 KLV encoder with validation
+- **`tests/test_klv_receiver.py`**: Python script to receive and decode KLV packets
+- **`parrot_forwarder.service`**: systemd service for automatic startup
+- **`GSTREAMER_SETUP.md`**: GStreamer installation and troubleshooting guide
 - **`requirements.txt`**: Pinned Python dependencies with versions
 
 ---
@@ -588,10 +689,23 @@ drone/
 
 ### Testing Scripts
 
+#### Test KLV Receiver
+
+```bash
+# Listen for KLV packets and decode them
+python tests/test_klv_receiver.py --port 12345
+
+# Output shows decoded telemetry in real-time:
+# Timestamp: 2025-10-06 21:32:05.123456
+# Latitude: 37.7749, Longitude: -122.4194
+# Altitude: 125.5m MSL
+# Roll: -5.2°, Pitch: 2.1°, Yaw: 180.0°
+```
+
 #### Test Telemetry Connection
 
 ```bash
-python test_drone_connection.py
+python tests/test_drone_connection.py
 ```
 
 Outputs comprehensive telemetry data including battery, GPS, altitude, attitude, speed, and flying state.
@@ -599,53 +713,54 @@ Outputs comprehensive telemetry data including battery, GPS, altitude, attitude,
 #### Test Video Stream
 
 ```bash
-python test_video_stream.py
+python tests/test_video_stream.py
 ```
 
-Captures and saves video frames to `video_frames/` directory for verification.
+Captures and saves video frames for verification.
 
-### Adding Forwarding Implementations
+### Testing the Unified Stream
 
-The placeholder methods `forward_telemetry()` and `forward_frame()` are ready for implementation:
+```bash
+# 1. Start ParrotForwarder
+python ParrotForwarder.py
 
-#### Telemetry Forwarding (Example: UDP)
+# 2. In another terminal, view stream info
+ffprobe srt://localhost:8890
 
-```python
-def forward_telemetry(self, telemetry):
-    """Forward telemetry via UDP."""
-    import socket
-    import json
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    message = json.dumps(telemetry).encode('utf-8')
-    sock.sendto(message, (self.remote_host, self.remote_port))
+# Expected output:
+#   Stream #0:0: Video: h264, 1280x720, 29.97 fps
+#   Stream #0:1: Data: klv (KLVA / 0x41564C4B)
+
+# 3. Record 10 seconds with both streams
+ffmpeg -i srt://localhost:8890 -c copy -map 0:v -map 0:d -t 10 test.ts
+
+# 4. Verify recording
+ffprobe test.ts
 ```
 
-#### Video Forwarding (Example: RTMP)
+### Modifying KLV Encoding
+
+To add new MISB 0601 tags, edit `parrot_forwarder/klv_encoder.py`:
 
 ```python
-def forward_frame(self, frame):
-    """Forward frame via RTMP stream."""
-    # Encode frame to H.264
-    encoded = self.encoder.encode(frame)
-    
-    # Send to RTMP server
-    self.rtmp_stream.write(encoded)
-    
-    self.forwarded_count += 1
+class MISB0601Encoder:
+    def add_custom_field(self, tag_number, value):
+        """Add a custom MISB 0601 tag."""
+        # Encode value according to MISB 0601 spec
+        encoded = self._encode_value(value)
+        self.fields[tag_number] = encoded
 ```
 
 ### Logging Levels
 
-Adjust logging verbosity:
+Adjust logging verbosity by modifying the systemd service or command line:
 
-```python
-# In ParrotForwarder.py, modify:
-logging.basicConfig(
-    level=logging.DEBUG,  # Change to DEBUG, INFO, WARNING, ERROR
-    format='[%(asctime)s] %(levelname)s - %(name)s - %(message)s',
-    datefmt='%H:%M:%S'
-)
+```bash
+# For systemd service, edit parrot_forwarder.service:
+ExecStart=/path/to/python ParrotForwarder.py --verbose
+
+# Or run directly with DEBUG logging:
+python ParrotForwarder.py --verbose
 ```
 
 ---
@@ -662,25 +777,70 @@ logging.basicConfig(
 3. Ensure Skycontroller is powered on and drone is connected
 4. Verify IP address: `ping 192.168.53.1`
 
-### Video Stream Errors
+### GStreamer Issues
 
-**Problem**: `No frames received from stream`
+**Problem**: `No such element or plugin 'mpegtsmux'`
 
 **Solutions**:
-1. Ensure drone camera is active (not in standby)
-2. Check for H.264 decoder warnings in logs
-3. Verify video stream is enabled on drone
-4. Try restarting the drone and Skycontroller
+1. Install missing plugins: `sudo apt-get install gstreamer1.0-plugins-bad`
+2. Verify installation: `gst-inspect-1.0 mpegtsmux`
+3. Check GStreamer version: `gst-launch-1.0 --version` (need 1.14+)
+4. Ensure using system GStreamer, not Anaconda: `which gst-launch-1.0` should show `/usr/bin/`
+
+**Problem**: `No such element or plugin 'srtsink'`
+
+**Solutions**:
+1. Install SRT support: `sudo apt-get install gstreamer1.0-plugins-bad`
+2. If still missing, SRT plugin may not be compiled in your GStreamer build
+3. Alternative: Use `udpsink` and run FFmpeg separately for SRT output
+
+**Problem**: `GStreamer pipeline terminated unexpectedly`
+
+**Solutions**:
+1. Check logs: `sudo journalctl -u parrot_forwarder -n 100`
+2. Test RTSP manually: `gst-launch-1.0 rtspsrc location=rtsp://192.168.53.1/live ! fakesink`
+3. Verify KLV port is sending data: `python tests/test_klv_receiver.py --port 12345`
+4. Enable GStreamer debug: `GST_DEBUG=3 python ParrotForwarder.py`
+
+### SRT Connection Issues
+
+**Problem**: Client can't connect to SRT stream
+
+**Solutions**:
+1. Check firewall: `sudo ufw allow 8890`
+2. Verify stream is running: `sudo netstat -tlnp | grep 8890`
+3. Test locally first: `ffplay srt://localhost:8890`
+4. Ensure VPN/network allows SRT port
+5. Check SRT URL format: `srt://host:port` (no query string needed for client connections)
+
+### KLV/Telemetry Issues
+
+**Problem**: `Stream #0:1: Data: klv` appears in ffprobe but no telemetry
+
+**Solutions**:
+1. Check TelemetryForwarder is running and sending packets
+2. Verify KLV port: `python tests/test_klv_receiver.py --port 12345`
+3. Check for GPS fix - drone may be sending placeholder coordinates indoors
+4. Review logs for KLV encoding errors: `sudo journalctl -u parrot_forwarder | grep KLV`
+
+**Problem**: `struct.error: 'i' format requires ...` in KLV encoder
+
+**Solutions**:
+1. This occurs when GPS is not fixed (invalid coordinates)
+2. The encoder automatically validates coordinates and skips invalid values
+3. Fly drone outdoors or wait for GPS fix
+4. Check logs for "GPS not fixed" messages
 
 ### Performance Degradation
 
-**Problem**: `Video forwarding is running at 85% of target FPS`
+**Problem**: High CPU usage or stuttering video
 
 **Solutions**:
-1. Reduce target FPS: `--video-fps 20`
-2. Check CPU usage: `top` or `htop`
-3. Ensure no other heavy processes are running
-4. Consider using hardware encoding for video
+1. Check CPU usage: `top` or `htop`
+2. Ensure no other heavy processes are running
+3. Increase GStreamer buffer: Edit pipeline `latency=500`
+4. Reduce KLV rate: `--telemetry-fps 5`
+5. Check network bandwidth with `iftop` or similar
 
 ### Import Errors
 
@@ -730,6 +890,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - **Parrot Developers** for the [Olympe SDK](https://developer.parrot.com/docs/olympe/)
+- **GStreamer Community** for the powerful multimedia framework
+- **SRT Alliance** for the Secure Reliable Transport protocol
+- **MISB** for the KLV metadata standards (Motion Imagery Standards Board)
 - **Raspberry Pi Foundation** for the excellent hardware platform
 - **OpenCV Community** for video processing capabilities
 
