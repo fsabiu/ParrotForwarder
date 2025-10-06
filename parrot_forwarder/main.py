@@ -21,7 +21,8 @@ class ParrotForwarder:
     """
     
     def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
-                 srt_port=8890, klv_port_start=12345):
+                 srt_port=8890, klv_port_start=12345, auto_reconnect=True,
+                 health_check_interval=5):
         """
         Initialize the Parrot forwarder.
         
@@ -31,6 +32,8 @@ class ParrotForwarder:
             video_fps: Frames per second for video forwarding
             srt_port: SRT port for video stream (default: 8890)
             klv_port_start: Starting port for KLV telemetry (default: 12345, will find next available)
+            auto_reconnect: Enable automatic reconnection on drone disconnect (default: True)
+            health_check_interval: Seconds between connection health checks (default: 5)
         """
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
         
@@ -42,6 +45,11 @@ class ParrotForwarder:
         self.telemetry_forwarder = None
         self.video_forwarder = None
         self._shutdown_requested = False
+        self._is_forwarding = False
+        
+        # Auto-reconnect settings
+        self.auto_reconnect = auto_reconnect
+        self.health_check_interval = health_check_interval
         
         # Find available port for KLV telemetry
         self.klv_port = self._find_free_port(klv_port_start)
@@ -174,9 +182,40 @@ class ParrotForwarder:
             time.sleep(0.5)
         
         self.logger.warning("⚠ Drone telemetry initialization timeout - proceeding anyway")
+    
+    def is_drone_connected(self):
+        """
+        Check if the drone is currently connected.
+        
+        Returns:
+            bool: True if drone is connected and responsive, False otherwise
+        """
+        if not self.drone:
+            return False
+        
+        try:
+            # Check connection state using Olympe's internal state
+            # The drone object has a _connected attribute
+            if hasattr(self.drone, '_connected') and not self.drone._connected:
+                return False
+            
+            # Try to get telemetry to verify the connection is alive
+            from olympe.messages.common.CommonState import BatteryStateChanged
+            battery = self.drone.get_state(BatteryStateChanged)
+            
+            # If we can get state, connection is alive
+            return battery is not None
+            
+        except Exception as e:
+            self.logger.debug(f"Connection check failed: {e}")
+            return False
         
     def start_forwarding(self):
         """Start both telemetry and video forwarding."""
+        if self._is_forwarding:
+            self.logger.warning("Forwarders already running, skipping start")
+            return
+        
         self.logger.info("=" * 60)
         self.logger.info("Starting Parrot Forwarder")
         self.logger.info(f"  Drone IP: {self.drone_ip}")
@@ -186,6 +225,10 @@ class ParrotForwarder:
         self.logger.info(f"  Output: Unified SRT stream (video + KLV) on port {self.srt_port}")
         self.logger.info(f"  Client command: ffplay 'srt://<your-ip>:{self.srt_port}'")
         self.logger.info(f"  NOTE: Using GStreamer for native KLV muxing")
+        if self.auto_reconnect:
+            self.logger.info(f"  Auto-reconnect: ENABLED (health check every {self.health_check_interval}s)")
+        else:
+            self.logger.info(f"  Auto-reconnect: DISABLED")
         self.logger.info("=" * 60)
         
         # Create forwarders
@@ -209,12 +252,17 @@ class ParrotForwarder:
         self.video_forwarder.start()
         
         self.logger.info("✓ Both forwarders started")
+        self._is_forwarding = True
         
         # Give forwarders a moment to initialize
         time.sleep(1)
         
     def stop_forwarding(self):
         """Stop both telemetry and video forwarding."""
+        if not self._is_forwarding:
+            self.logger.debug("Forwarders not running, skipping stop")
+            return
+        
         self.logger.info("Stopping forwarders...")
         
         # Note: Video streaming is handled directly via RTSP/FFmpeg,
@@ -238,6 +286,9 @@ class ParrotForwarder:
             if self.video_forwarder.is_alive():
                 self.logger.warning("Video forwarder thread did not stop cleanly")
         
+        self._is_forwarding = False
+        self.telemetry_forwarder = None
+        self.video_forwarder = None
         self.logger.info("✓ Forwarders stopped")
         
     def disconnect(self):
@@ -253,39 +304,85 @@ class ParrotForwarder:
     def run(self, duration=None, max_retries=None, retry_interval=5):
         """
         Run the forwarder for a specified duration or until interrupted.
+        With auto_reconnect enabled, monitors connection and automatically reconnects.
         
         Args:
             duration: Duration in seconds (None = run indefinitely)
-            max_retries: Maximum connection retry attempts (None = infinite)
+            max_retries: Maximum connection retry attempts for initial connection (None = infinite)
             retry_interval: Seconds between connection retries
         """
+        start_time = time.time()
+        connection_attempts = 0
+        last_health_check = 0
+        
         try:
+            # Initial connection
             self.connect(max_retries=max_retries, retry_interval=retry_interval)
             self.start_forwarding()
+            connection_attempts = 0
             
+            # Main monitoring loop
             if duration:
                 self.logger.info(f"Running for {duration} seconds...")
-                for _ in range(duration):
-                    if self._shutdown_requested:
-                        break
-                    time.sleep(1)
             else:
                 self.logger.info("Running indefinitely (Ctrl+C to stop)...")
-                try:
-                    while not self._shutdown_requested:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    self.logger.info("\n⚠ Interrupted by user")
+            
+            while not self._shutdown_requested:
+                current_time = time.time()
+                
+                # Check if duration expired
+                if duration and (current_time - start_time) >= duration:
+                    self.logger.info("Duration expired, shutting down...")
+                    break
+                
+                # Perform health check at intervals
+                if self.auto_reconnect and (current_time - last_health_check) >= self.health_check_interval:
+                    last_health_check = current_time
+                    
+                    if not self.is_drone_connected():
+                        self.logger.warning("⚠ Drone connection lost! Attempting to reconnect...")
+                        connection_attempts += 1
+                        
+                        # Stop forwarders before reconnecting
+                        self.stop_forwarding()
+                        self.disconnect()
+                        
+                        # Wait a moment before reconnecting
+                        time.sleep(2)
+                        
+                        # Attempt reconnection
+                        try:
+                            self.logger.info(f"Reconnection attempt #{connection_attempts}...")
+                            self.connect(max_retries=3, retry_interval=retry_interval)
+                            self.start_forwarding()
+                            
+                            self.logger.info(f"✓ Successfully reconnected to drone (attempt #{connection_attempts})")
+                            connection_attempts = 0
+                            
+                        except KeyboardInterrupt:
+                            raise
+                        except Exception as e:
+                            self.logger.error(f"Reconnection attempt #{connection_attempts} failed: {e}")
+                            self.logger.info(f"Will retry in {retry_interval} seconds...")
+                            time.sleep(retry_interval)
+                            continue
+                
+                # Sleep for a short interval
+                time.sleep(1)
             
         except KeyboardInterrupt:
             self.logger.info("\n⚠ Shutting down gracefully...")
         except Exception as e:
             import traceback
-            self.logger.error(f"Error: {e}")
+            self.logger.error(f"Fatal error: {e}")
             self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
         
         finally:
             self.stop_forwarding()
             self.disconnect()
+            
+            # Print summary
+            if connection_attempts > 0:
+                self.logger.info(f"Session summary: {connection_attempts} reconnection(s) performed")
 

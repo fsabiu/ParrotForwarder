@@ -74,6 +74,17 @@ def parse_args():
         help='Seconds to wait between connection retries (default: 5)'
     )
     parser.add_argument(
+        '--no-auto-reconnect',
+        action='store_true',
+        help='Disable automatic reconnection on drone disconnect'
+    )
+    parser.add_argument(
+        '--health-check-interval',
+        type=int,
+        default=5,
+        help='Seconds between connection health checks (default: 5)'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose SDK logging (shows all Olympe logs)'
@@ -103,7 +114,9 @@ def main():
             drone_ip=args.drone_ip,
             telemetry_fps=args.telemetry_fps,
             video_fps=args.video_fps,
-            srt_port=args.srt_port
+            srt_port=args.srt_port,
+            auto_reconnect=not args.no_auto_reconnect,
+            health_check_interval=args.health_check_interval
         )
         
         forwarder.run(
