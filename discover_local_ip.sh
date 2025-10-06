@@ -16,4 +16,4 @@ fi
 echo "$IP"
 
 # Output the ffplay command (line 2)
-echo "ffplay -rtsp_transport tcp rtsp://$IP:8554/parrot_stream"
+echo "ffplay -fflags nobuffer -flags low_delay 'srt://$IP:8890'"
