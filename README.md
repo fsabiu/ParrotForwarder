@@ -117,7 +117,7 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
               │ H.264 @ 1280x720         │ (Attitude, GPS, Battery)
               │                          │
 ┌─────────────▼──────────────────────────▼────────────────────┐
-│              Raspberry Pi 4 - ParrotForwarder               │
+│              Linux System - ParrotForwarder                 │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │              CLI Layer (cli.py)                      │  │
@@ -342,14 +342,18 @@ This layered approach ensures that errors at any level are handled appropriately
 
 ### Hardware
 
-- **Raspberry Pi 4** (2GB+ RAM recommended, 4GB preferred)
+- **Linux System** (2GB+ RAM recommended, 4GB preferred)
+  - Tested on Ubuntu 25, but any Linux distribution compatible with Olympe SDK should work
+  - Examples: Ubuntu, Debian, Fedora, Arch Linux, etc.
 - **Parrot Anafi** drone with Skycontroller 3
-- **USB connection** between Raspberry Pi and Skycontroller
+- **USB connection** between Linux host and Skycontroller
 - **Network connection** for VPN (WiFi or Ethernet)
 
 ### Software
 
-- **Operating System**: Raspberry Pi OS (Debian-based) or Ubuntu
+- **Operating System**: Linux (Olympe SDK compatible)
+  - Recommended: Ubuntu 20.04+, Debian 11+
+  - Tested on: Ubuntu 25
 - **Python**: 3.11.x (tested on 3.11.2)
 - **GStreamer**: 1.14+ (system installation via apt, not Anaconda)
   - Core: `gstreamer1.0-tools`, `gstreamer1.0-plugins-base`
@@ -453,7 +457,7 @@ source drone_env/bin/activate
 python ParrotForwarder.py
 ```
 
-The unified stream will be available at `srt://<raspberry-pi-ip>:8890`
+The unified stream will be available at `srt://<your-linux-host-ip>:8890`
 
 ### Command-Line Options
 
@@ -476,13 +480,13 @@ Options:
 #### Using ffplay (FFmpeg)
 ```bash
 # Basic playback with low latency
-ffplay -fflags nobuffer -flags low_delay srt://<raspberry-pi-ip>:8890
+ffplay -fflags nobuffer -flags low_delay srt://<your-linux-host-ip>:8890
 
-# View video only
+# View video only (example with VPN IP)
 ffplay -fflags nobuffer -flags low_delay srt://100.105.188.84:8890
 
 # View stream info (shows both video and KLV data streams)
-ffprobe srt://100.105.188.84:8890
+ffprobe srt://<your-linux-host-ip>:8890
 ```
 
 #### Recording the Stream
@@ -596,7 +600,7 @@ SRT protocol provides Forward Error Correction and automatic retransmission, mak
 
 ### Typical Performance Metrics
 
-On Raspberry Pi 4 (4GB), with default settings:
+On a Linux system (tested on Ubuntu 25 with 4GB RAM), with default settings:
 
 ```
 Telemetry Forwarder:
@@ -772,7 +776,7 @@ python ParrotForwarder.py --verbose
 **Problem**: `Failed to connect to drone at 192.168.53.1`
 
 **Solutions**:
-1. Verify USB connection between Raspberry Pi and Skycontroller
+1. Verify USB connection between Linux host and Skycontroller
 2. Check network interface: `ip addr show usb0`
 3. Ensure Skycontroller is powered on and drone is connected
 4. Verify IP address: `ping 192.168.53.1`
@@ -893,7 +897,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **GStreamer Community** for the powerful multimedia framework
 - **SRT Alliance** for the Secure Reliable Transport protocol
 - **MISB** for the KLV metadata standards (Motion Imagery Standards Board)
-- **Raspberry Pi Foundation** for the excellent hardware platform
+- **Linux Community** for the robust open-source operating system platform
 - **OpenCV Community** for video processing capabilities
 
 ---
