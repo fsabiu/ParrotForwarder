@@ -20,7 +20,7 @@ class VideoForwarder(threading.Thread):
     Uses GStreamer's mpegtsmux for proper data stream support.
     """
     
-    def __init__(self, drone_ip, srt_port=8890, klv_port=12345):
+    def __init__(self, drone_ip, srt_port=8890, klv_port=12345, stats_interval=30):
         """
         Initialize the video forwarder.
         
@@ -28,6 +28,7 @@ class VideoForwarder(threading.Thread):
             drone_ip: IP address of the drone
             srt_port: Port for SRT output stream
             klv_port: Local UDP port for KLV telemetry data
+            stats_interval: Seconds between status reports (default: 30)
         """
         super().__init__(daemon=True)
         self.drone_ip = drone_ip
@@ -36,7 +37,76 @@ class VideoForwarder(threading.Thread):
         self.srt_url = f"srt://0.0.0.0:{srt_port}?mode=listener"
         self.gst_process = None
         self._stop_event = threading.Event()
-
+        
+        # Statistics tracking
+        self.stats_interval = stats_interval
+        self.start_time = None
+        self.last_stats_time = None
+        self.gst_warnings = 0
+        self.gst_errors = 0
+        self.stderr_thread = None
+    
+    def _monitor_gstreamer_stderr(self):
+        """Monitor GStreamer stderr output for errors and warnings."""
+        if not self.gst_process:
+            return
+        
+        try:
+            for line in iter(self.gst_process.stderr.readline, ''):
+                if not line:
+                    break
+                
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Count warnings and errors
+                line_lower = line.lower()
+                if 'warning' in line_lower:
+                    self.gst_warnings += 1
+                    # Only log first few warnings to avoid spam
+                    if self.gst_warnings <= 3:
+                        logger.warning(f"GStreamer: {line}")
+                elif 'error' in line_lower or 'critical' in line_lower:
+                    self.gst_errors += 1
+                    logger.error(f"GStreamer: {line}")
+                elif 'state change' in line_lower and 'playing' in line_lower:
+                    logger.info("GStreamer pipeline state: PLAYING")
+                    
+        except Exception as e:
+            logger.debug(f"Error reading GStreamer stderr: {e}")
+    
+    def _log_status(self):
+        """Log periodic status update."""
+        if self.start_time is None:
+            return
+        
+        current_time = time.time()
+        
+        # Check if it's time to report
+        if self.last_stats_time is None or (current_time - self.last_stats_time) >= self.stats_interval:
+            uptime = current_time - self.start_time
+            uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
+            
+            # Check process health
+            if self.gst_process and self.gst_process.poll() is None:
+                status = "✓ STREAMING"
+            else:
+                status = "✗ STOPPED"
+            
+            # Format status message
+            status_msg = (
+                f"{status} | Uptime: {uptime_str} | "
+                f"Port: {self.srt_port} | "
+                f"Issues: {self.gst_errors} errors, {self.gst_warnings} warnings"
+            )
+            
+            if self.gst_errors == 0:
+                logger.info(status_msg)
+            else:
+                logger.warning(status_msg)
+            
+            self.last_stats_time = current_time
     
     def run(self):
         """Main thread execution - forward video stream and KLV data via GStreamer."""
@@ -91,20 +161,50 @@ class VideoForwarder(threading.Thread):
                 text=True
             )
             
+            # Start monitoring stderr in separate thread
+            self.stderr_thread = threading.Thread(
+                target=self._monitor_gstreamer_stderr,
+                daemon=True,
+                name="GStreamerStderrMonitor"
+            )
+            self.stderr_thread.start()
+            
             logger.info(f"✓ SRT stream started on port {self.srt_port}")
             logger.info(f"  Input: {drone_rtsp_url}")
             logger.info(f"  Clients can connect: srt://<your-ip>:{self.srt_port}")
             
-            # Monitor GStreamer output
+            # Initialize timing for status reports
+            self.start_time = time.time()
+            self.last_stats_time = self.start_time
+            
+            # Monitor GStreamer process
+            check_interval = 1  # Check every second
             while not self._stop_event.is_set():
+                # Check if process is still running
                 if self.gst_process.poll() is not None:
-                    # Process terminated
-                    stdout, stderr = self.gst_process.communicate()
-                    logger.error(f"GStreamer process terminated unexpectedly")
-                    logger.error(f"STDOUT: {stdout}")
-                    logger.error(f"STDERR: {stderr}")
+                    # Process terminated unexpectedly
+                    logger.error(f"✗ GStreamer process terminated unexpectedly (exit code: {self.gst_process.returncode})")
+                    
+                    # Try to get remaining output
+                    try:
+                        remaining_stderr = self.gst_process.stderr.read()
+                        if remaining_stderr:
+                            logger.error(f"Final GStreamer output: {remaining_stderr}")
+                    except:
+                        pass
+                    
                     break
-                time.sleep(1)
+                
+                # Log periodic status
+                self._log_status()
+                
+                time.sleep(check_interval)
+            
+            # Final status
+            if self.start_time:
+                total_uptime = time.time() - self.start_time
+                uptime_str = time.strftime("%H:%M:%S", time.gmtime(total_uptime))
+                logger.info(f"Video streaming session ended - Total uptime: {uptime_str}")
                 
         except Exception as e:
             logger.error(f"Error starting GStreamer: {e}")

@@ -22,7 +22,7 @@ class ParrotForwarder:
     
     def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
                  srt_port=8890, klv_port_start=12345, auto_reconnect=True,
-                 health_check_interval=5):
+                 health_check_interval=5, video_stats_interval=30):
         """
         Initialize the Parrot forwarder.
         
@@ -34,6 +34,7 @@ class ParrotForwarder:
             klv_port_start: Starting port for KLV telemetry (default: 12345, will find next available)
             auto_reconnect: Enable automatic reconnection on drone disconnect (default: True)
             health_check_interval: Seconds between connection health checks (default: 5)
+            video_stats_interval: Seconds between video status reports (default: 30)
         """
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
         
@@ -50,6 +51,9 @@ class ParrotForwarder:
         # Auto-reconnect settings
         self.auto_reconnect = auto_reconnect
         self.health_check_interval = health_check_interval
+        
+        # Stats settings
+        self.video_stats_interval = video_stats_interval
         
         # Find available port for KLV telemetry
         self.klv_port = self._find_free_port(klv_port_start)
@@ -240,7 +244,8 @@ class ParrotForwarder:
         self.video_forwarder = VideoForwarder(
             self.drone_ip,
             self.srt_port,
-            self.klv_port
+            self.klv_port,
+            self.video_stats_interval
         )
         
         # Wait for video stream to initialize

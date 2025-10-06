@@ -85,17 +85,28 @@ ParrotForwarder is a professional-grade UAS streaming system that synchronizes v
 
 - **Real-time FPS tracking** (target vs actual)
 - **Telemetry performance:** 10.0 fps actual, 0 errors
-- **Video performance:** 29.97 fps from drone
+- **Video streaming status:** Periodic health reports (uptime, port, errors/warnings)
 - **Loop timing statistics** (avg, min, max)
 - **Performance indicators** (✓ ≥95%, ⚠ 80-95%, ✗ <80%)
+- **GStreamer error monitoring** with automatic counting and reporting
 - **Detailed final statistics** on shutdown
+
+### ✅ Automatic Reconnection & Reliability
+
+- **Connection health monitoring** with configurable check intervals (default: 5s)
+- **Automatic drone reconnection** when connection is lost
+- **Zero manual intervention** - service continues running through disconnections
+- **Graceful forwarder restart** on reconnection with state cleanup
+- **Session statistics** tracking reconnection attempts and duration
+- **Battery change support** - reconnects automatically when drone powers back on
 
 ### ✅ Production-Ready
 
 - **systemd service integration** for automatic startup
+- **Auto-reconnect enabled by default** for continuous operation
 - **Dynamic port allocation** for KLV stream
 - **Graceful error handling** and recovery
-- **Comprehensive logging** with configurable levels
+- **Comprehensive logging** with configurable levels and intervals
 - **Clean shutdown** with proper resource cleanup
 - **Modular design** with separation of concerns
 
@@ -131,6 +142,7 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
 │  │        ParrotForwarder Class                         │  │
 │  ├──────────────────────────────────────────────────────┤  │
 │  │  • Drone connection with retry logic                │  │
+│  │  • Auto-reconnect with health monitoring            │  │
 │  │  • Thread lifecycle management                       │  │
 │  │  • Dynamic KLV port allocation                       │  │
 │  │  • Graceful shutdown (KeyboardInterrupt)            │  │
@@ -146,7 +158,8 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
 │  │ • Encodes to KLV         │   │ • UDP input (KLV)    │  │
 │  │ • MISB 0601 format       │   │ • mpegtsmux          │  │
 │  │ • Precise 10 Hz timing   │   │ • SRT output         │  │
-│  │ • Sends to localhost UDP │   │ • 0:Video + 1:Data   │  │
+│  │ • Performance stats      │   │ • Status monitoring  │  │
+│  │ • Sends to localhost UDP │   │ • Error tracking     │  │
 │  └────┬─────────────────────┘   └───────────┬──────────┘  │
 │       │ KLV over UDP (localhost:12345)      │              │
 │       │                                      │              │
@@ -264,6 +277,45 @@ Main Thread (ParrotForwarder)
    - Swap forwarding protocols (UDP → TCP → WebSocket)
    - Add data transformations (filters, compression)
    - Implement recording capabilities
+
+### GStreamer Pipeline Configuration
+
+The video forwarding pipeline is optimized for balanced latency and stability:
+
+```gstreamer
+rtspsrc location=rtsp://192.168.53.1/live protocols=udp latency=50
+  → rtph264depay
+  → h264parse
+  → queue max-size-time=200000000 leaky=downstream  # 200ms max, discard old frames
+  → mpegtsmux alignment=7
+  
+udpsrc port=12345
+  → meta/x-klv,parsed=true
+  → queue max-size-time=200000000 leaky=downstream
+  → mpegtsmux
+
+mpegtsmux → srtsink uri=srt://0.0.0.0:8890 latency=100 mode=listener
+```
+
+**Latency Configuration:**
+- `rtspsrc latency=50`: 50ms input buffer (reduced from default 200ms)
+- `queue leaky=downstream`: Discard old frames if queue fills up
+- `srtsink latency=100`: 100ms SRT buffer (reduced from default 200ms)
+- **Total expected latency**: ~300-400ms (input + mux + output + network)
+
+**For Ultra-Low Latency** (at cost of stability):
+```bash
+# Edit video.py pipeline to:
+# rtspsrc latency=0 drop-on-latency=true
+# queue max-size-time=100000000  # 100ms max
+# srtsink latency=50
+# Expected latency: <200ms
+```
+
+**Trade-offs:**
+- Lower latency = Higher chance of frame drops on network hiccups
+- Higher latency = More stable stream, buffered against jitter
+- Default settings balance both needs for production use
 
 ### Data Flow
 
@@ -465,14 +517,18 @@ The unified stream will be available at `srt://<your-linux-host-ip>:8890`
 python ParrotForwarder.py [OPTIONS]
 
 Options:
-  --drone-ip IP            Drone IP address (default: 192.168.53.1)
-  --srt-port PORT          SRT output port (default: 8890)
-  --telemetry-fps FPS      Telemetry/KLV update rate in Hz (default: 10)
-  --duration SECONDS       Run duration in seconds (default: infinite)
-  --max-retries N          Maximum connection retry attempts (default: infinite)
-  --retry-interval SECS    Seconds between connection retries (default: 5)
-  --verbose                Enable verbose SDK logging
-  -h, --help               Show help message
+  --drone-ip IP                 Drone IP address (default: 192.168.53.1)
+  --srt-port PORT               SRT output port (default: 8890)
+  --telemetry-fps FPS           Telemetry/KLV update rate in Hz (default: 10)
+  --video-fps FPS               Video framerate (default: 30, informational)
+  --duration SECONDS            Run duration in seconds (default: infinite)
+  --max-retries N               Maximum connection retry attempts (default: infinite)
+  --retry-interval SECS         Seconds between connection retries (default: 5)
+  --no-auto-reconnect           Disable automatic reconnection on drone disconnect
+  --health-check-interval SECS  Seconds between connection health checks (default: 5)
+  --video-stats-interval SECS   Seconds between video status reports (default: 30)
+  --verbose                     Enable verbose SDK logging
+  -h, --help                    Show help message
 ```
 
 ### Viewing the Stream
@@ -525,6 +581,38 @@ python ParrotForwarder.py --duration 30
 python ParrotForwarder.py \
     --max-retries 5 \
     --retry-interval 10
+```
+
+#### Auto-Reconnect Configuration
+```bash
+# Default: Auto-reconnect enabled (recommended for production)
+python ParrotForwarder.py
+# Automatically reconnects when drone disconnects
+# Health check every 5 seconds, video status every 30 seconds
+
+# Aggressive monitoring (faster reconnection detection)
+python ParrotForwarder.py \
+    --health-check-interval 3 \
+    --video-stats-interval 15
+# Checks connection every 3s, reports video status every 15s
+
+# Disable auto-reconnect (legacy behavior)
+python ParrotForwarder.py --no-auto-reconnect
+# Service stops if drone disconnects
+```
+
+#### Logging Configuration
+```bash
+# Quiet mode: Less frequent video status updates
+python ParrotForwarder.py --video-stats-interval 60
+# Video status reported every 60 seconds instead of 30
+
+# Verbose monitoring: More frequent updates
+python ParrotForwarder.py \
+    --health-check-interval 3 \
+    --video-stats-interval 10 \
+    --verbose
+# Connection checks every 3s, video status every 10s, verbose SDK logs
 ```
 
 ---
@@ -629,21 +717,33 @@ Unified Stream:
 
 ### Monitoring Performance
 
-Performance statistics are logged every 5 seconds:
+Performance statistics are logged automatically:
 
 ```
+# Telemetry stats (every 5 seconds)
 [21:32:05] INFO - TelemetryForwarder - ✓ PERFORMANCE: 
-    Target=10.0 fps, Actual=10.0 fps (100.0%) | 
-    Loop: avg=0.08ms, min=0.05ms, max=0.15ms | 
-    KLV packets sent: 50, Errors: 0
+    Target=10.0 fps, Actual=10.00 fps (100.0%) | 
+    Loop: avg=0.34ms, min=0.17ms, max=0.53ms | 
+    Count=2681 | KLV: sent=2681, errors=0
 
-[21:32:05] INFO - VideoForwarder - ✓ GStreamer pipeline running
-    Input: rtsp://192.168.53.1/live
-    Output: srt://0.0.0.0:8890 (MPEG-TS with KLV)
+# Video stats (every 30 seconds, configurable)
+[21:32:35] INFO - VideoForwarder - ✓ STREAMING | 
+    Uptime: 00:04:30 | Port: 8890 | 
+    Issues: 0 errors, 0 warnings
+
+# Connection health monitoring (auto-reconnect enabled)
+[21:33:00] WARNING - ParrotForwarder - ⚠ Drone connection lost! Attempting to reconnect...
+[21:33:05] INFO - ParrotForwarder - ✓ Successfully reconnected to drone (attempt #1)
 
 # View logs in real-time
 sudo journalctl -u parrot_forwarder -f
 ```
+
+**Log Intervals:**
+- Telemetry performance: Every 5 seconds
+- Video streaming status: Every 30 seconds (configurable with `--video-stats-interval`)
+- Connection health checks: Every 5 seconds (configurable with `--health-check-interval`)
+- GStreamer errors: Logged immediately
 
 ---
 
@@ -780,6 +880,58 @@ python ParrotForwarder.py --verbose
 2. Check network interface: `ip addr show usb0`
 3. Ensure Skycontroller is powered on and drone is connected
 4. Verify IP address: `ping 192.168.53.1`
+5. With auto-reconnect enabled (default), the service will automatically retry connection
+
+**Problem**: Drone keeps disconnecting and reconnecting
+
+**Solutions**:
+1. Check USB cable quality and connection stability
+2. Verify Skycontroller battery level
+3. Check system logs for USB errors: `dmesg | grep usb`
+4. Monitor reconnection frequency: `sudo journalctl -u parrot_forwarder | grep reconnect`
+5. Adjust health check interval if false positives occur: `--health-check-interval 10`
+6. If frequent reconnections persist, disable auto-reconnect and investigate: `--no-auto-reconnect`
+
+**Problem**: Service stops after drone disconnect (legacy behavior)
+
+**Solution**:
+- Auto-reconnect is now enabled by default. If you're running an old version or have disabled it:
+  ```bash
+  # Enable auto-reconnect (default behavior)
+  python ParrotForwarder.py
+  # Or explicitly enable it
+  python ParrotForwarder.py --health-check-interval 5
+  ```
+
+### Auto-Reconnect Behavior
+
+The service now automatically handles drone disconnections:
+
+```
+# Normal operation
+[13:20:00] INFO - VideoForwarder - ✓ STREAMING | Uptime: 00:05:00 | Port: 8890 | Issues: 0 errors, 0 warnings
+[13:20:05] INFO - TelemetryForwarder - ✓ PERFORMANCE: Target=10.0 fps, Actual=10.00 fps (100.0%)
+
+# Drone disconnect detected
+[13:20:10] WARNING - ParrotForwarder - ⚠ Drone connection lost! Attempting to reconnect...
+[13:20:10] INFO - ParrotForwarder - Stopping forwarders...
+[13:20:10] INFO - ParrotForwarder - Disconnecting from drone...
+
+# Automatic reconnection
+[13:20:12] INFO - ParrotForwarder - Reconnection attempt #1...
+[13:20:14] INFO - ParrotForwarder - ✓ Connected to drone
+[13:20:14] INFO - ParrotForwarder - Starting Parrot Forwarder
+[13:20:15] INFO - ParrotForwarder - ✓ Both forwarders started
+[13:20:15] INFO - ParrotForwarder - ✓ Successfully reconnected to drone (attempt #1)
+
+# Service continues normally
+[13:20:20] INFO - VideoForwarder - ✓ STREAMING | Uptime: 00:00:05 | Port: 8890 | Issues: 0 errors, 0 warnings
+```
+
+**Configuration options:**
+- `--health-check-interval N`: Set health check frequency (default: 5 seconds)
+- `--no-auto-reconnect`: Disable auto-reconnect (service stops on disconnect)
+- `--retry-interval N`: Seconds between reconnection attempts (default: 5)
 
 ### GStreamer Issues
 

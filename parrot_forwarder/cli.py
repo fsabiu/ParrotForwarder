@@ -85,6 +85,12 @@ def parse_args():
         help='Seconds between connection health checks (default: 5)'
     )
     parser.add_argument(
+        '--video-stats-interval',
+        type=int,
+        default=30,
+        help='Seconds between video status reports (default: 30)'
+    )
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose SDK logging (shows all Olympe logs)'
@@ -116,7 +122,8 @@ def main():
             video_fps=args.video_fps,
             srt_port=args.srt_port,
             auto_reconnect=not args.no_auto_reconnect,
-            health_check_interval=args.health_check_interval
+            health_check_interval=args.health_check_interval,
+            video_stats_interval=args.video_stats_interval
         )
         
         forwarder.run(
