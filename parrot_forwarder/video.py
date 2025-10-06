@@ -58,24 +58,21 @@ class VideoForwarder(threading.Thread):
         # 6. srtsink: Output to SRT
         
         pipeline = (
-            # Video source from drone
-            f"rtspsrc location={drone_rtsp_url} protocols=udp latency=200 ! "
+            f"rtspsrc location={drone_rtsp_url} protocols=udp latency=50 ! "
             "application/x-rtp,media=video,encoding-name=H264 ! "
             "rtph264depay ! "
             "h264parse ! "
             "video/x-h264,stream-format=byte-stream,alignment=au ! "
-            "queue max-size-buffers=0 max-size-time=0 max-size-bytes=0 ! "
+            "queue max-size-time=200000000 leaky=downstream ! "  # 200ms max, scarta vecchi
             "mux. "
             
-            # KLV data source (raw KLV from Python)
             f"udpsrc port={self.klv_port} ! "
             "meta/x-klv,parsed=true ! "
-            "queue ! "
+            "queue max-size-time=200000000 leaky=downstream ! "
             "mux. "
             
-            # Mux and output
             "mpegtsmux name=mux alignment=7 ! "
-            f"srtsink uri=\"{self.srt_url}\" latency=200 mode=listener"
+            f"srtsink uri=\"{self.srt_url}\" latency=100 mode=listener"
         )
         
         # Use system GStreamer (not Anaconda's old version)

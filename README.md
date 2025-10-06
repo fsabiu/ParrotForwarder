@@ -310,8 +310,8 @@ Main Thread (ParrotForwarder)
 | Video Stream | 29.97 fps | 29.97 fps | H.264 from drone, no transcoding |
 | Unified Stream | N/A | Video + Data | Both streams synchronized in MPEG-TS |
 | KLV Encoding | <1ms | ~0.1ms per packet | MISB 0601 encoding overhead |
-| GStreamer Latency | 200ms | Configurable | Set in pipeline parameters |
-| SRT Latency | 200ms | Configurable | Set in srtsink parameters |
+| GStreamer Latency | 50ms | Configurable | Set in pipeline parameters |
+| SRT Latency | 100ms | Configurable | Set in srtsink parameters |
 | Total End-to-End | ~400ms | Video + KLV synchronized | Suitable for monitoring applications |
 
 ### Error Handling Strategy
@@ -561,7 +561,7 @@ The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 
 #### GStreamer Latency Configuration
 
-The default latency is 200ms for both RTSP input and SRT output. To adjust:
+The default latency is 50ms for RTSP input and 100ms for SRT output. To adjust:
 
 Edit `parrot_forwarder/video.py` and modify the pipeline:
 ```python
