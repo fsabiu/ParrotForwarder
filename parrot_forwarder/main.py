@@ -245,7 +245,8 @@ class ParrotForwarder:
             self.drone_ip,
             self.srt_port,
             self.klv_port,
-            self.video_stats_interval
+            self.video_stats_interval,
+            use_high_latency=True
         )
         
         # Wait for video stream to initialize

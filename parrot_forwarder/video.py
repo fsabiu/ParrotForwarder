@@ -20,7 +20,7 @@ class VideoForwarder(threading.Thread):
     Uses GStreamer's mpegtsmux for proper data stream support.
     """
     
-    def __init__(self, drone_ip, srt_port=8890, klv_port=12345, stats_interval=30):
+    def __init__(self, drone_ip, srt_port=8890, klv_port=12345, stats_interval=30, use_high_latency=True):
         """
         Initialize the video forwarder.
         
@@ -29,12 +29,15 @@ class VideoForwarder(threading.Thread):
             srt_port: Port for SRT output stream
             klv_port: Local UDP port for KLV telemetry data
             stats_interval: Seconds between status reports (default: 30)
+            use_high_latency: Use high-latency pipeline for poor networks (default: True)
+                            Set to False for low-latency on good networks
         """
         super().__init__(daemon=True)
         self.drone_ip = drone_ip
         self.srt_port = srt_port
         self.klv_port = klv_port
         self.srt_url = f"srt://0.0.0.0:{srt_port}?mode=listener"
+        self.use_high_latency = use_high_latency
         self.gst_process = None
         self._stop_event = threading.Event()
         
@@ -75,6 +78,90 @@ class VideoForwarder(threading.Thread):
                     
         except Exception as e:
             logger.debug(f"Error reading GStreamer stderr: {e}")
+    
+    def _build_low_latency_pipeline(self, drone_rtsp_url):
+        """
+        Build LOW-LATENCY pipeline for good network conditions.
+        
+        - Lower latency (~200ms total)
+        - Smaller buffers
+        - Best for: USB connection, strong WiFi, low packet loss
+        - Latency: ~0.2 seconds
+        
+        Args:
+            drone_rtsp_url: RTSP URL of drone video stream
+            
+        Returns:
+            str: GStreamer pipeline string
+        """
+        return (
+            # RTSP source - minimal latency
+            f"rtspsrc location={drone_rtsp_url} protocols=udp latency=50 ! "
+            "application/x-rtp,media=video,encoding-name=H264 ! "
+            "rtph264depay ! "
+            "h264parse ! "
+            "video/x-h264,stream-format=byte-stream,alignment=au ! "
+            "queue max-size-time=200000000 leaky=downstream ! "  # 200ms buffer
+            "mux. "
+            
+            # KLV data source
+            f"udpsrc port={self.klv_port} ! "
+            "meta/x-klv,parsed=true ! "
+            "queue max-size-time=200000000 leaky=downstream ! "
+            "mux. "
+            
+            # MPEG-TS muxer
+            "mpegtsmux name=mux alignment=7 ! "
+            
+            # SRT sink - low latency
+            f"srtsink uri=\"{self.srt_url}\" latency=200 mode=listener"
+        )
+    
+    def _build_high_latency_pipeline(self, drone_rtsp_url):
+        """
+        Build HIGH-LATENCY pipeline for poor network conditions.
+        
+        - Higher latency (~1000ms total)
+        - Larger buffers
+        - Better packet loss recovery
+        - Best for: WiFi with interference, packet drops, jitter
+        - Latency: ~1.0 second
+        
+        Args:
+            drone_rtsp_url: RTSP URL of drone video stream
+            
+        Returns:
+            str: GStreamer pipeline string
+        """
+        return (
+            # RTSP source with increased buffering and error recovery
+            f"rtspsrc location={drone_rtsp_url} protocols=udp latency=300 buffer-mode=auto retry=5 timeout=5000000 ! "
+            "application/x-rtp,media=video,encoding-name=H264 ! "
+            
+            # RTP depayloader
+            "rtph264depay ! "
+            
+            # H.264 parser with periodic config resend for recovery
+            "h264parse config-interval=-1 ! "
+            "video/x-h264,stream-format=byte-stream,alignment=au ! "
+            
+            # Large video queue - 500ms buffer
+            "queue max-size-buffers=0 max-size-bytes=0 max-size-time=500000000 leaky=downstream ! "
+            "mux. "
+            
+            # KLV data with matching buffer
+            f"udpsrc port={self.klv_port} ! "
+            "meta/x-klv,parsed=true ! "
+            "queue max-size-buffers=0 max-size-bytes=0 max-size-time=500000000 leaky=downstream ! "
+            "mux. "
+            
+            # MPEG-TS muxer
+            "mpegtsmux name=mux alignment=7 ! "
+            
+            # SRT sink with high latency for network resilience
+            f"srtsink uri=\"{self.srt_url}\" latency=1000 mode=listener "
+            "wait-for-connection=false pbkeylen=0"
+        )
     
     def _log_status(self):
         """Log periodic status update."""
@@ -119,31 +206,13 @@ class VideoForwarder(threading.Thread):
         logger.info(f"Streaming video from {drone_rtsp_url} via SRT")
         logger.info(f"Muxing with KLV data from localhost:{self.klv_port}")
         
-        # GStreamer pipeline:
-        # 1. rtspsrc: Read RTSP video from drone
-        # 2. rtph264depay: Depacketize RTP H.264
-        # 3. h264parse: Parse H.264 stream
-        # 4. udpsrc: Read raw KLV data from Python
-        # 5. mpegtsmux: Mux video and KLV data into single TS
-        # 6. srtsink: Output to SRT
-        
-        pipeline = (
-            f"rtspsrc location={drone_rtsp_url} protocols=udp latency=50 ! "
-            "application/x-rtp,media=video,encoding-name=H264 ! "
-            "rtph264depay ! "
-            "h264parse ! "
-            "video/x-h264,stream-format=byte-stream,alignment=au ! "
-            "queue max-size-time=200000000 leaky=downstream ! "  # 200ms max, scarta vecchi
-            "mux. "
-            
-            f"udpsrc port={self.klv_port} ! "
-            "meta/x-klv,parsed=true ! "
-            "queue max-size-time=200000000 leaky=downstream ! "
-            "mux. "
-            
-            "mpegtsmux name=mux alignment=7 ! "
-            f"srtsink uri=\"{self.srt_url}\" latency=100 mode=listener"
-        )
+        # Select pipeline based on network quality
+        if self.use_high_latency:
+            logger.info("Using HIGH-LATENCY pipeline (better for poor networks)")
+            pipeline = self._build_high_latency_pipeline(drone_rtsp_url)
+        else:
+            logger.info("Using LOW-LATENCY pipeline (better for good networks)")
+            pipeline = self._build_low_latency_pipeline(drone_rtsp_url)
         
         # Use system GStreamer (not Anaconda's old version)
         cmd = ["/usr/bin/gst-launch-1.0", "-e"] + pipeline.split()
