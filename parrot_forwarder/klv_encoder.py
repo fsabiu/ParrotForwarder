@@ -32,6 +32,16 @@ class MISB0601Encoder:
     TAG_PLATFORM_PITCH = 6      # Platform pitch angle (degrees)
     TAG_PLATFORM_HEADING = 7    # Platform heading angle (degrees)
     
+    # --- NEW: MISB 0601 Tags for Gimbal and Camera ---
+    TAG_SENSOR_H_FOV = 18       # Sensor horizontal field of view (degrees)
+    TAG_SENSOR_V_FOV = 19       # Sensor vertical field of view (degrees)
+    TAG_SENSOR_REL_ROLL = 21    # Sensor relative roll angle (degrees)
+    TAG_SENSOR_REL_PITCH = 22   # Sensor relative elevation angle (degrees)
+    TAG_SENSOR_REL_YAW = 23     # Sensor relative azimuth angle (degrees)
+    TAG_SENSOR_WIDTH = 102      # Sensor width (millimeters)
+    TAG_SENSOR_HEIGHT = 103     # Sensor height (millimeters)
+    TAG_FOCAL_LENGTH = 104      # Focal length (millimeters)
+    
     def __init__(self):
         """Initialize the MISB 0601 encoder."""
         self.items = []
@@ -131,6 +141,101 @@ class MISB0601Encoder:
         value = struct.pack('>H', scaled & 0xFFFF)
         self.items.append((self.TAG_PLATFORM_HEADING, value))
     
+    # --- NEW: METHODS FOR GIMBAL AND CAMERA PARAMETERS ---
+    
+    def add_sensor_relative_roll(self, roll: float):
+        """
+        Add sensor relative roll angle in degrees (gimbal roll).
+        
+        Args:
+            roll: Sensor relative roll angle in degrees (-180 to +180)
+        """
+        # Encode as 4-byte signed integer (scaled by 1e6)
+        scaled = int(roll * 1e6)
+        value = struct.pack('>i', scaled)
+        self.items.append((self.TAG_SENSOR_REL_ROLL, value))
+    
+    def add_sensor_relative_pitch(self, pitch: float):
+        """
+        Add sensor relative pitch/elevation angle in degrees (gimbal pitch).
+        
+        Args:
+            pitch: Sensor relative pitch angle in degrees (-90 to +90)
+        """
+        # Encode as 4-byte signed integer (scaled by 1e6)
+        scaled = int(pitch * 1e6)
+        value = struct.pack('>i', scaled)
+        self.items.append((self.TAG_SENSOR_REL_PITCH, value))
+    
+    def add_sensor_relative_yaw(self, yaw: float):
+        """
+        Add sensor relative azimuth/yaw angle in degrees (gimbal yaw).
+        
+        Args:
+            yaw: Sensor relative yaw angle in degrees (-180 to +180)
+        """
+        # Encode as 4-byte signed integer (scaled by 1e6)
+        scaled = int(yaw * 1e6)
+        value = struct.pack('>i', scaled)
+        self.items.append((self.TAG_SENSOR_REL_YAW, value))
+    
+    def add_sensor_h_fov(self, fov: float):
+        """
+        Add sensor horizontal field of view in degrees.
+        
+        Args:
+            fov: Horizontal field of view in degrees (0 to 180)
+        """
+        # Encode as 2-byte unsigned integer (scaled by 100)
+        scaled = int(fov * 100)
+        value = struct.pack('>H', scaled & 0xFFFF)
+        self.items.append((self.TAG_SENSOR_H_FOV, value))
+    
+    def add_sensor_v_fov(self, fov: float):
+        """
+        Add sensor vertical field of view in degrees.
+        
+        Args:
+            fov: Vertical field of view in degrees (0 to 180)
+        """
+        # Encode as 2-byte unsigned integer (scaled by 100)
+        scaled = int(fov * 100)
+        value = struct.pack('>H', scaled & 0xFFFF)
+        self.items.append((self.TAG_SENSOR_V_FOV, value))
+    
+    def add_sensor_width(self, width: float):
+        """
+        Add sensor width in millimeters.
+        
+        Args:
+            width: Sensor width in millimeters
+        """
+        # Encode as 4-byte float
+        value = struct.pack('>f', width)
+        self.items.append((self.TAG_SENSOR_WIDTH, value))
+    
+    def add_sensor_height(self, height: float):
+        """
+        Add sensor height in millimeters.
+        
+        Args:
+            height: Sensor height in millimeters
+        """
+        # Encode as 4-byte float
+        value = struct.pack('>f', height)
+        self.items.append((self.TAG_SENSOR_HEIGHT, value))
+    
+    def add_focal_length(self, focal_length: float):
+        """
+        Add focal length in millimeters.
+        
+        Args:
+            focal_length: Focal length in millimeters
+        """
+        # Encode as 4-byte float
+        value = struct.pack('>f', focal_length)
+        self.items.append((self.TAG_FOCAL_LENGTH, value))
+    
     def _encode_ber_length(self, length: int) -> bytes:
         """
         Encode length using BER (Basic Encoding Rules).
@@ -196,25 +301,27 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
         if 'timestamp_us' in telemetry and telemetry['timestamp_us'] is not None:
             encoder.add_timestamp(telemetry['timestamp_us'])
         
-        # Check if GPS is valid before adding GPS data
-        gps_fixed = telemetry.get('gps_fixed', False)
+        # --- ALWAYS ADD GPS DATA (using defaults if not available) ---
+        # Add latitude (always present, uses default if GPS not fixed)
+        if 'latitude' in telemetry and telemetry['latitude'] is not None:
+            lat = float(telemetry['latitude'])
+            if -90.0 <= lat <= 90.0:
+                encoder.add_latitude(lat)
         
-        # Add GPS data only if GPS is fixed and values are in valid ranges
-        if gps_fixed:
-            if 'latitude' in telemetry and telemetry['latitude'] is not None:
-                lat = float(telemetry['latitude'])
-                if -90.0 <= lat <= 90.0:
-                    encoder.add_latitude(lat)
-            
-            if 'longitude' in telemetry and telemetry['longitude'] is not None:
-                lon = float(telemetry['longitude'])
-                if -180.0 <= lon <= 180.0:
-                    encoder.add_longitude(lon)
-            
-            if 'altitude' in telemetry and telemetry['altitude'] is not None:
-                alt = float(telemetry['altitude'])
-                if 0 <= alt < 6553.5:  # Max value for 2-byte scaled by 10
-                    encoder.add_altitude(alt)
+        # Add longitude (always present, uses default if GPS not fixed)
+        if 'longitude' in telemetry and telemetry['longitude'] is not None:
+            lon = float(telemetry['longitude'])
+            if -180.0 <= lon <= 180.0:
+                encoder.add_longitude(lon)
+        
+        # Add altitude (use 10m default if not available)
+        if 'altitude' in telemetry and telemetry['altitude'] is not None:
+            alt = float(telemetry['altitude'])
+            if 0 <= alt < 6553.5:  # Max value for 2-byte scaled by 10
+                encoder.add_altitude(alt)
+        else:
+            # Default altitude: 10 meters
+            encoder.add_altitude(10.0)
         
         # Add orientation data (always available even without GPS)
         if 'roll' in telemetry and telemetry['roll'] is not None:
@@ -234,6 +341,31 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
                 yaw = yaw + 360.0
             if 0 <= yaw <= 360.0:
                 encoder.add_heading(yaw)
+        
+        # --- NEW: ADD CAMERA SENSOR PARAMETERS (static data) ---
+        if 'camera_sensor_width' in telemetry and telemetry['camera_sensor_width'] is not None:
+            encoder.add_sensor_width(float(telemetry['camera_sensor_width']))
+        
+        if 'camera_sensor_height' in telemetry and telemetry['camera_sensor_height'] is not None:
+            encoder.add_sensor_height(float(telemetry['camera_sensor_height']))
+        
+        if 'camera_focal_length' in telemetry and telemetry['camera_focal_length'] is not None:
+            encoder.add_focal_length(float(telemetry['camera_focal_length']))
+        
+        # --- NEW: ADD GIMBAL STATE (absolute orientation) ---
+        # These represent the camera/sensor orientation relative to the platform
+        if 'gimbal_yaw_abs' in telemetry and telemetry['gimbal_yaw_abs'] is not None:
+            encoder.add_sensor_relative_yaw(float(telemetry['gimbal_yaw_abs']))
+        
+        if 'gimbal_pitch_abs' in telemetry and telemetry['gimbal_pitch_abs'] is not None:
+            encoder.add_sensor_relative_pitch(float(telemetry['gimbal_pitch_abs']))
+        
+        if 'gimbal_roll_abs' in telemetry and telemetry['gimbal_roll_abs'] is not None:
+            encoder.add_sensor_relative_roll(float(telemetry['gimbal_roll_abs']))
+        
+        # Note: Gimbal offsets and camera alignment offsets are included in telemetry
+        # but may need to be applied to compute final orientation rather than
+        # transmitted separately. They are available in the telemetry dict if needed.
         
         # Pack and return (even if empty - will contain just the KLV header)
         return encoder.pack()

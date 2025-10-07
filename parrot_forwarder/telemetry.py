@@ -20,6 +20,10 @@ from olympe.messages.ardrone3.PilotingState import (
 from olympe.messages.ardrone3.GPSSettingsState import GPSFixStateChanged
 from olympe.messages.common.CommonState import BatteryStateChanged
 
+# --- NEW IMPORTS (gimbal + camera) ---
+from olympe.messages.gimbal import attitude as GimbalAttitude, offsets as GimbalOffsets
+from olympe.messages.camera import alignment_offsets
+
 
 class TelemetryForwarder(threading.Thread):
     """
@@ -45,6 +49,12 @@ class TelemetryForwarder(threading.Thread):
         self.running = False
         self.telemetry_count = 0
         self.logger = logging.getLogger(f"{__name__}.{name}")
+        
+        # --- NEW: SENSOR PARAMETERS (initialization only) ---
+        # Sensor format: 1/2.4" CMOS (~6.3 x 4.7 mm)
+        self.SENSOR_WIDTH_MM = 6.3
+        self.SENSOR_HEIGHT_MM = 4.7
+        self.FOCAL_LENGTH_EQ_MM = 23.0  # 35mm equivalent at 1x zoom
         
         # KLV forwarding configuration - always send to localhost for FFmpeg
         self.local_klv_host = '127.0.0.1'
@@ -91,13 +101,30 @@ class TelemetryForwarder(threading.Thread):
             gps_fix = self.drone.get_state(GPSFixStateChanged)
             if gps_fix:
                 telemetry['gps_fixed'] = bool(gps_fix.get('fixed', 0))
+
+            # Camera details
+            telemetry['camera_sensor_width'] = self.SENSOR_WIDTH_MM
+            telemetry['camera_sensor_height'] = self.SENSOR_HEIGHT_MM
+            telemetry['camera_focal_length'] = self.FOCAL_LENGTH_EQ_MM
             
             # Position
             position = self.drone.get_state(PositionChanged)
             if position:
-                telemetry['latitude'] = position.get('latitude', None)
-                telemetry['longitude'] = position.get('longitude', None)
-                telemetry['altitude'] = position.get('altitude', None)
+                # Get position values (may be 500.0 if GPS not available - Parrot's invalid GPS marker)
+                lat = position.get('latitude', 500.0)
+                lon = position.get('longitude', 500.0)
+                alt = position.get('altitude', 500.0)
+                
+                # Use default coordinates if GPS returns invalid values (500.0)
+                # Valid ranges: lat [-90, 90], lon [-180, 180], alt [0, 6553]
+                telemetry['latitude'] = 36.71549027372183 if (lat == 500.0 or not -90.0 <= lat <= 90.0) else lat
+                telemetry['longitude'] = -4.287949979844388 if (lon == 500.0 or not -180.0 <= lon <= 180.0) else lon
+                telemetry['altitude'] = 10.0 if (alt == 500.0 or alt < 0 or alt > 6553.0) else alt
+            else:
+                # Set default coordinates when position is not available
+                telemetry['latitude'] = 36.71549027372183
+                telemetry['longitude'] = -4.287949979844388
+                telemetry['altitude'] = 10.0  # Default altitude: 10 meters
             
             # Altitude
             altitude = self.drone.get_state(AltitudeChanged)
@@ -122,6 +149,32 @@ class TelemetryForwarder(threading.Thread):
             flying_state = self.drone.get_state(FlyingStateChanged)
             if flying_state:
                 telemetry['flying_state'] = flying_state.get('state', None)
+            
+            # --- NEW: GIMBAL STATE ---
+            gatt = self.drone.get_state(GimbalAttitude)
+            if gatt:
+                # Absolute gimbal orientation (yaw/pitch/roll)
+                # Defines camera pointing direction in world frame
+                telemetry['gimbal_yaw_abs'] = gatt.get('yaw_absolute', None)
+                telemetry['gimbal_pitch_abs'] = gatt.get('pitch_absolute', None)
+                telemetry['gimbal_roll_abs'] = gatt.get('roll_absolute', None)
+
+            goff = self.drone.get_state(GimbalOffsets)
+            if goff:
+                # Real-time gimbal correction offsets (yaw/pitch/roll)
+                # Apply these to refine the camera orientation
+                telemetry['gimbal_offset_yaw'] = goff.get('current_yaw', None)
+                telemetry['gimbal_offset_pitch'] = goff.get('current_pitch', None)
+                telemetry['gimbal_offset_roll'] = goff.get('current_roll', None)
+
+            # --- NEW: CAMERA ALIGNMENT OFFSETS ---
+            cam_align = self.drone.get_state(alignment_offsets)
+            if cam_align:
+                # Fixed misalignment between camera and gimbal/drone
+                # Include these for accurate orientation chaining
+                telemetry['cam_align_yaw'] = cam_align.get('current_yaw', None)
+                telemetry['cam_align_pitch'] = cam_align.get('current_pitch', None)
+                telemetry['cam_align_roll'] = cam_align.get('current_roll', None)
             
         except Exception as e:
             # Only log error if it's not an uninitialized state (which is expected initially)
