@@ -6,6 +6,7 @@ KLV (Key-Length-Value) is a binary encoding standard used for metadata.
 """
 
 import struct
+import math
 from typing import Dict, Any, Optional
 
 
@@ -41,6 +42,11 @@ class MISB0601Encoder:
     TAG_SENSOR_WIDTH = 102      # Sensor width (millimeters)
     TAG_SENSOR_HEIGHT = 103     # Sensor height (millimeters)
     TAG_FOCAL_LENGTH = 104      # Focal length (millimeters)
+    
+    # Custom tags for gimbal absolute angles (vendor-specific 105-110)
+    TAG_GIMBAL_ABS_YAW = 105    # Gimbal absolute yaw (degrees)
+    TAG_GIMBAL_ABS_PITCH = 106  # Gimbal absolute pitch (degrees)
+    TAG_GIMBAL_ABS_ROLL = 107   # Gimbal absolute roll (degrees)
     
     def __init__(self):
         """Initialize the MISB 0601 encoder."""
@@ -236,6 +242,42 @@ class MISB0601Encoder:
         value = struct.pack('>f', focal_length)
         self.items.append((self.TAG_FOCAL_LENGTH, value))
     
+    def add_gimbal_absolute_yaw(self, yaw: float):
+        """
+        Add gimbal absolute yaw angle in degrees.
+        
+        Args:
+            yaw: Gimbal absolute yaw in degrees (-180 to +180)
+        """
+        # Encode as 4-byte signed integer (scaled by 1e6)
+        scaled = int(yaw * 1e6)
+        value = struct.pack('>i', scaled)
+        self.items.append((self.TAG_GIMBAL_ABS_YAW, value))
+    
+    def add_gimbal_absolute_pitch(self, pitch: float):
+        """
+        Add gimbal absolute pitch angle in degrees.
+        
+        Args:
+            pitch: Gimbal absolute pitch in degrees (-90 to +90)
+        """
+        # Encode as 4-byte signed integer (scaled by 1e6)
+        scaled = int(pitch * 1e6)
+        value = struct.pack('>i', scaled)
+        self.items.append((self.TAG_GIMBAL_ABS_PITCH, value))
+    
+    def add_gimbal_absolute_roll(self, roll: float):
+        """
+        Add gimbal absolute roll angle in degrees.
+        
+        Args:
+            roll: Gimbal absolute roll in degrees (-180 to +180)
+        """
+        # Encode as 4-byte signed integer (scaled by 1e6)
+        scaled = int(roll * 1e6)
+        value = struct.pack('>i', scaled)
+        self.items.append((self.TAG_GIMBAL_ABS_ROLL, value))
+    
     def _encode_ber_length(self, length: int) -> bytes:
         """
         Encode length using BER (Basic Encoding Rules).
@@ -323,24 +365,28 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
             # Default altitude: 10 meters
             encoder.add_altitude(10.0)
         
-        # Add orientation data (always available even without GPS)
+        # Add orientation data (platform attitude from AttitudeChanged is in RADIANS)
+        # Convert to degrees for KLV encoding (MISB 0601 expects degrees)
         if 'roll' in telemetry and telemetry['roll'] is not None:
-            roll = float(telemetry['roll'])
-            if -180.0 <= roll <= 180.0:
-                encoder.add_roll(roll)
+            roll_rad = float(telemetry['roll'])
+            roll_deg = math.degrees(roll_rad)
+            if -180.0 <= roll_deg <= 180.0:
+                encoder.add_roll(roll_deg)
         
         if 'pitch' in telemetry and telemetry['pitch'] is not None:
-            pitch = float(telemetry['pitch'])
-            if -90.0 <= pitch <= 90.0:
-                encoder.add_pitch(pitch)
+            pitch_rad = float(telemetry['pitch'])
+            pitch_deg = math.degrees(pitch_rad)
+            if -90.0 <= pitch_deg <= 90.0:
+                encoder.add_pitch(pitch_deg)
         
         if 'yaw' in telemetry and telemetry['yaw'] is not None:
-            yaw = float(telemetry['yaw'])
+            yaw_rad = float(telemetry['yaw'])
+            yaw_deg = math.degrees(yaw_rad)
             # Normalize yaw to 0-360 range if needed
-            if yaw < 0:
-                yaw = yaw + 360.0
-            if 0 <= yaw <= 360.0:
-                encoder.add_heading(yaw)
+            if yaw_deg < 0:
+                yaw_deg = yaw_deg + 360.0
+            if 0 <= yaw_deg <= 360.0:
+                encoder.add_heading(yaw_deg)
         
         # --- NEW: ADD CAMERA SENSOR PARAMETERS (static data) ---
         if 'camera_sensor_width' in telemetry and telemetry['camera_sensor_width'] is not None:
@@ -352,20 +398,31 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
         if 'camera_focal_length' in telemetry and telemetry['camera_focal_length'] is not None:
             encoder.add_focal_length(float(telemetry['camera_focal_length']))
         
-        # --- NEW: ADD GIMBAL STATE (absolute orientation) ---
-        # These represent the camera/sensor orientation relative to the platform
+        # --- NEW: ADD GIMBAL STATE ---
+        # Send BOTH relative and absolute gimbal angles
+        
+        # MISB 0601 Tags 21-23: Sensor Relative Angles (relative to platform/drone)
+        if 'gimbal_yaw_rel' in telemetry and telemetry['gimbal_yaw_rel'] is not None:
+            encoder.add_sensor_relative_yaw(float(telemetry['gimbal_yaw_rel']))
+        
+        if 'gimbal_pitch_rel' in telemetry and telemetry['gimbal_pitch_rel'] is not None:
+            encoder.add_sensor_relative_pitch(float(telemetry['gimbal_pitch_rel']))
+        
+        if 'gimbal_roll_rel' in telemetry and telemetry['gimbal_roll_rel'] is not None:
+            encoder.add_sensor_relative_roll(float(telemetry['gimbal_roll_rel']))
+        
+        # Custom Tags 105-107: Gimbal Absolute Angles (world frame reference)
         if 'gimbal_yaw_abs' in telemetry and telemetry['gimbal_yaw_abs'] is not None:
-            encoder.add_sensor_relative_yaw(float(telemetry['gimbal_yaw_abs']))
+            encoder.add_gimbal_absolute_yaw(float(telemetry['gimbal_yaw_abs']))
         
         if 'gimbal_pitch_abs' in telemetry and telemetry['gimbal_pitch_abs'] is not None:
-            encoder.add_sensor_relative_pitch(float(telemetry['gimbal_pitch_abs']))
+            encoder.add_gimbal_absolute_pitch(float(telemetry['gimbal_pitch_abs']))
         
         if 'gimbal_roll_abs' in telemetry and telemetry['gimbal_roll_abs'] is not None:
-            encoder.add_sensor_relative_roll(float(telemetry['gimbal_roll_abs']))
+            encoder.add_gimbal_absolute_roll(float(telemetry['gimbal_roll_abs']))
         
-        # Note: Gimbal offsets and camera alignment offsets are included in telemetry
-        # but may need to be applied to compute final orientation rather than
-        # transmitted separately. They are available in the telemetry dict if needed.
+        # Note: Gimbal offsets and camera alignment offsets are collected
+        # in telemetry dict and available for post-processing or alternative uses
         
         # Pack and return (even if empty - will contain just the KLV header)
         return encoder.pack()

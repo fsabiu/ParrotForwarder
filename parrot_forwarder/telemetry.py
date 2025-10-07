@@ -9,6 +9,7 @@ import time
 import threading
 import json
 import socket
+import math
 from datetime import datetime
 
 from .klv_encoder import encode_telemetry_to_klv
@@ -23,6 +24,10 @@ from olympe.messages.common.CommonState import BatteryStateChanged
 # --- NEW IMPORTS (gimbal + camera) ---
 from olympe.messages.gimbal import attitude as GimbalAttitude, offsets as GimbalOffsets
 from olympe.messages.camera import alignment_offsets
+
+# --- NEW IMPORTS (heading) ---
+from olympe.messages.ardrone3.PilotingState import AttitudeChanged
+
 
 
 class TelemetryForwarder(threading.Thread):
@@ -131,7 +136,8 @@ class TelemetryForwarder(threading.Thread):
             if altitude:
                 telemetry['altitude_agl'] = altitude.get('altitude', None)
             
-            # Attitude (orientation)
+            # Attitude (orientation) - NOTE: roll/pitch/yaw are in RADIANS (sent as-is)
+            # Conversion to degrees will be done on the receiver side
             attitude = self.drone.get_state(AttitudeChanged)
             if attitude:
                 telemetry['roll'] = attitude.get('roll', None)
@@ -151,26 +157,34 @@ class TelemetryForwarder(threading.Thread):
                 telemetry['flying_state'] = flying_state.get('state', None)
             
             # --- NEW: GIMBAL STATE ---
+            # Gimbal angles are already in DEGREES according to Olympe documentation
             gatt = self.drone.get_state(GimbalAttitude)
             if gatt:
-                # Absolute gimbal orientation (yaw/pitch/roll)
+                # Absolute gimbal orientation (yaw/pitch/roll) - already in degrees
                 # Defines camera pointing direction in world frame
                 telemetry['gimbal_yaw_abs'] = gatt.get('yaw_absolute', None)
                 telemetry['gimbal_pitch_abs'] = gatt.get('pitch_absolute', None)
                 telemetry['gimbal_roll_abs'] = gatt.get('roll_absolute', None)
+                
+                # Relative gimbal orientation (yaw/pitch/roll) - already in degrees
+                # Relative to platform orientation
+                telemetry['gimbal_yaw_rel'] = gatt.get('yaw_relative', None)
+                telemetry['gimbal_pitch_rel'] = gatt.get('pitch_relative', None)
+                telemetry['gimbal_roll_rel'] = gatt.get('roll_relative', None)
 
             goff = self.drone.get_state(GimbalOffsets)
             if goff:
-                # Real-time gimbal correction offsets (yaw/pitch/roll)
+                # Real-time gimbal correction offsets (yaw/pitch/roll) - already in degrees
                 # Apply these to refine the camera orientation
                 telemetry['gimbal_offset_yaw'] = goff.get('current_yaw', None)
                 telemetry['gimbal_offset_pitch'] = goff.get('current_pitch', None)
                 telemetry['gimbal_offset_roll'] = goff.get('current_roll', None)
 
             # --- NEW: CAMERA ALIGNMENT OFFSETS ---
+            # Camera alignment offsets are already in DEGREES according to Olympe documentation
             cam_align = self.drone.get_state(alignment_offsets)
             if cam_align:
-                # Fixed misalignment between camera and gimbal/drone
+                # Fixed misalignment between camera and gimbal/drone - already in degrees
                 # Include these for accurate orientation chaining
                 telemetry['cam_align_yaw'] = cam_align.get('current_yaw', None)
                 telemetry['cam_align_pitch'] = cam_align.get('current_pitch', None)
