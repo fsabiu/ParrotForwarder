@@ -70,14 +70,17 @@ ParrotForwarder is a professional-grade UAS streaming system that synchronizes v
 
 ### ✅ Telemetry/KLV Metadata
 
-- **MISB 0601 compliant** KLV encoding
+- **MISB 0601 compliant** KLV encoding with comprehensive sensor data
 - **10 Hz update rate** for telemetry
 - **Comprehensive data:**
   - Unix timestamp (microseconds)
-  - GPS position (latitude, longitude, altitude MSL)
-  - Attitude (roll, pitch, yaw in radians)
-  - Battery level
-  - GPS fix status
+  - GPS position (latitude, longitude, altitude MSL) with fallback defaults
+  - Platform attitude (roll, pitch, yaw in degrees)
+  - Gimbal state (absolute and relative yaw/pitch/roll angles)
+  - Camera sensor parameters (width, height, focal length)
+  - Battery level and GPS fix status
+- **GPS fallback system** - uses default coordinates when GPS unavailable
+- **Enhanced sensor tracking** - includes gimbal offsets and camera alignment
 - **Validation and scaling** per MISB 0601 specification
 - **UDP transport** for local KLV→GStreamer communication
 
@@ -99,6 +102,8 @@ ParrotForwarder is a professional-grade UAS streaming system that synchronizes v
 - **Graceful forwarder restart** on reconnection with state cleanup
 - **Session statistics** tracking reconnection attempts and duration
 - **Battery change support** - reconnects automatically when drone powers back on
+- **Configurable reconnection behavior** - can be disabled with `--no-auto-reconnect`
+- **Health check customization** - adjust monitoring frequency with `--health-check-interval`
 
 ### ✅ Production-Ready
 
@@ -146,6 +151,7 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
 │  │  • Thread lifecycle management                       │  │
 │  │  • Dynamic KLV port allocation                       │  │
 │  │  • Graceful shutdown (KeyboardInterrupt)            │  │
+│  │  • Enhanced monitoring & error tracking             │  │
 │  └────┬──────────────────────────────────────────┬──────┘  │
 │       │                                           │          │
 │  ┌────▼─────────────────────┐   ┌───────────────▼──────┐  │
@@ -160,6 +166,8 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
 │  │ • Precise 10 Hz timing   │   │ • SRT output         │  │
 │  │ • Performance stats      │   │ • Status monitoring  │  │
 │  │ • Sends to localhost UDP │   │ • Error tracking     │  │
+│  │ • GPS fallback system    │   │ • Latency modes      │  │
+│  │ • Gimbal & camera data   │   │ • Auto-recovery      │  │
 │  └────┬─────────────────────┘   └───────────┬──────────┘  │
 │       │ KLV over UDP (localhost:12345)      │              │
 │       │                                      │              │
@@ -489,10 +497,13 @@ pip install -r requirements.txt
 
 ```bash
 # Test drone connection (with drone powered on and connected)
-python test_drone_connection.py
+python tests/test_drone_connection.py
 
 # Test video stream
-python test_video_stream.py
+python tests/test_video_stream.py
+
+# Test KLV telemetry receiver
+python tests/test_klv_receiver.py --port 12345
 ```
 
 ---
@@ -596,6 +607,12 @@ python ParrotForwarder.py \
     --video-stats-interval 15
 # Checks connection every 3s, reports video status every 15s
 
+# Conservative monitoring (less frequent checks)
+python ParrotForwarder.py \
+    --health-check-interval 10 \
+    --video-stats-interval 60
+# Checks connection every 10s, reports video status every 60s
+
 # Disable auto-reconnect (legacy behavior)
 python ParrotForwarder.py --no-auto-reconnect
 # Service stops if drone disconnects
@@ -623,6 +640,7 @@ python ParrotForwarder.py \
 
 The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 
+#### Core Platform Data
 | MISB 0601 Tag | Field | Type | Description | Encoding |
 |---------------|-------|------|-------------|----------|
 | Tag 2 | `timestamp` | uint64 | Unix timestamp | Microseconds since epoch |
@@ -633,12 +651,35 @@ The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 | Tag 6 | `pitch` | int16 | Platform pitch | Degrees × 100, range ±90° |
 | Tag 7 | `yaw` | uint16 | Platform heading | Degrees × 100, 0-360° |
 
+#### Camera Sensor Parameters
+| MISB 0601 Tag | Field | Type | Description | Encoding |
+|---------------|-------|------|-------------|----------|
+| Tag 102 | `sensor_width` | float32 | Sensor width | Millimeters (6.3mm) |
+| Tag 103 | `sensor_height` | float32 | Sensor height | Millimeters (4.7mm) |
+| Tag 104 | `focal_length` | float32 | Focal length | Millimeters (23mm equiv) |
+
+#### Gimbal Orientation (Sensor Relative)
+| MISB 0601 Tag | Field | Type | Description | Encoding |
+|---------------|-------|------|-------------|----------|
+| Tag 21 | `gimbal_roll_rel` | int32 | Sensor relative roll | Degrees × 10^6, range ±180° |
+| Tag 22 | `gimbal_pitch_rel` | int32 | Sensor relative pitch | Degrees × 10^6, range ±90° |
+| Tag 23 | `gimbal_yaw_rel` | int32 | Sensor relative yaw | Degrees × 10^6, range ±180° |
+
+#### Gimbal Absolute Orientation (Custom Tags)
+| MISB 0601 Tag | Field | Type | Description | Encoding |
+|---------------|-------|------|-------------|----------|
+| Tag 105 | `gimbal_yaw_abs` | int32 | Gimbal absolute yaw | Degrees × 10^6, range ±180° |
+| Tag 106 | `gimbal_pitch_abs` | int32 | Gimbal absolute pitch | Degrees × 10^6, range ±90° |
+| Tag 107 | `gimbal_roll_abs` | int32 | Gimbal absolute roll | Degrees × 10^6, range ±180° |
+
 **Additional drone data collected (not in KLV stream):**
 - Battery level (%)
 - GPS fix status
 - Flying state
 - Altitude AGL
 - Speed vector (x, y, z)
+- Gimbal offsets (real-time corrections)
+- Camera alignment offsets (fixed misalignment)
 
 **KLV Packet Structure:**
 - Universal Label: `06 0E 2B 34 02 0B 01 01 0E 01 03 01 01 00 00 00`
@@ -649,15 +690,29 @@ The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 
 #### GStreamer Latency Configuration
 
-The default latency is 50ms for RTSP input and 100ms for SRT output. To adjust:
+The system now supports two pipeline modes:
 
-Edit `parrot_forwarder/video.py` and modify the pipeline:
+**High-Latency Mode (Default)** - Better for poor networks:
+- RTSP latency: 300ms
+- SRT latency: 1000ms
+- Total expected latency: ~1.3 seconds
+- Better packet loss recovery and stability
+
+**Low-Latency Mode** - Better for good networks:
+- RTSP latency: 50ms  
+- SRT latency: 200ms
+- Total expected latency: ~0.3 seconds
+- Requires stable network connection
+
+The mode is automatically selected based on the `use_high_latency` parameter in `VideoForwarder`. To modify:
+
+Edit `parrot_forwarder/video.py` and change the pipeline selection:
 ```python
-# Reduce latency (may cause stuttering on poor networks)
-"rtspsrc ... latency=100 ! ... srtsink ... latency=100"
+# Force low-latency mode
+pipeline = self._build_low_latency_pipeline(drone_rtsp_url)
 
-# Increase latency (smoother playback on poor networks)
-"rtspsrc ... latency=500 ! ... srtsink ... latency=500"
+# Force high-latency mode  
+pipeline = self._build_high_latency_pipeline(drone_rtsp_url)
 ```
 
 #### KLV Update Rate
@@ -978,14 +1033,24 @@ The service now automatically handles drone disconnections:
 2. Verify KLV port: `python tests/test_klv_receiver.py --port 12345`
 3. Check for GPS fix - drone may be sending placeholder coordinates indoors
 4. Review logs for KLV encoding errors: `sudo journalctl -u parrot_forwarder | grep KLV`
+5. GPS fallback system provides default coordinates when GPS unavailable
+6. Enhanced telemetry includes gimbal and camera sensor data
 
 **Problem**: `struct.error: 'i' format requires ...` in KLV encoder
 
 **Solutions**:
 1. This occurs when GPS is not fixed (invalid coordinates)
-2. The encoder automatically validates coordinates and skips invalid values
-3. Fly drone outdoors or wait for GPS fix
-4. Check logs for "GPS not fixed" messages
+2. The encoder automatically validates coordinates and uses fallback defaults
+3. **NEW**: Default coordinates (36.715°N, -4.288°W, 10m altitude) are used when GPS unavailable
+4. Check logs for "GPS not fixed" messages - this is now handled gracefully
+
+**Problem**: Missing gimbal or camera telemetry data
+
+**Solutions**:
+1. **NEW**: Verify drone supports gimbal telemetry (Parrot Anafi with Skycontroller 3)
+2. Check logs for gimbal state collection: `sudo journalctl -u parrot_forwarder | grep gimbal`
+3. Ensure drone is powered on and gimbal is initialized
+4. Camera sensor parameters are static and always included
 
 ### Performance Degradation
 
@@ -1061,4 +1126,23 @@ For questions, issues, or contributions, please open an issue on GitHub.
 ---
 
 **Built with ❤️ for autonomous drone applications**
+
+---
+
+## Recent Updates
+
+### v1.1.0 - Enhanced Telemetry & Auto-Reconnect
+- **Enhanced KLV Telemetry**: Added comprehensive gimbal and camera sensor data
+- **GPS Fallback System**: Automatic default coordinates when GPS unavailable  
+- **Auto-Reconnect**: Continuous operation through drone disconnections
+- **Dual Latency Modes**: High-latency (stable) and low-latency (fast) pipelines
+- **Enhanced Monitoring**: Real-time performance tracking and error reporting
+- **Improved Reliability**: Graceful error handling and automatic recovery
+
+### Key New Features
+- Gimbal orientation tracking (absolute and relative angles)
+- Camera sensor parameters (dimensions, focal length)
+- GPS fallback with default coordinates (36.715°N, -4.288°W)
+- Configurable health monitoring and reconnection behavior
+- Enhanced MISB 0601 KLV encoding with additional tags
 
