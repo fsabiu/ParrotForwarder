@@ -1,7 +1,13 @@
 # ADR-003 - Frontend stack for dashboard
 
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-04-17
+**Accepted**: 2026-04-17
+
+> Initial v2 ships a vanilla HTML/JS placeholder dashboard (no build step)
+> under ``src/parrot_forwarder/dashboard/static/``. The Svelte rewrite
+> tracked in T13/T15 may land in a follow-up once the REST + WS contract
+> has stabilized; the wire protocol is the source of truth either way.
 
 ## Context
 

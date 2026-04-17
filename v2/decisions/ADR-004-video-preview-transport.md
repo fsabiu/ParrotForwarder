@@ -1,7 +1,8 @@
 # ADR-004 - Video preview transport
 
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-04-17
+**Accepted**: 2026-04-17
 
 ## Context
 

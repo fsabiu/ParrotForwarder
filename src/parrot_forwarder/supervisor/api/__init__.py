@@ -15,11 +15,13 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp
 
+from ...dashboard import static_dir as dashboard_static_dir
 from ...state_machine import UserReset, UserStart, UserStop
 
 if TYPE_CHECKING:
@@ -91,6 +93,8 @@ def create_app(supervisor: Supervisor) -> FastAPI:
     app.add_exception_handler(Exception, _unhandled_exception_to_problem)
 
     _register_routes(app, supervisor)
+    _register_dashboard(app)
+    _register_preview_stub(app)
     return app
 
 
@@ -212,3 +216,57 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
 def make_asgi_app(supervisor: Supervisor) -> ASGIApp:
     """Return the ASGI callable for uvicorn."""
     return create_app(supervisor)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard + preview mounts
+# ---------------------------------------------------------------------------
+
+
+def _register_dashboard(app: FastAPI) -> None:
+    static_dir = dashboard_static_dir()
+    if not static_dir.is_dir():
+        return
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(static_dir)),
+        name="dashboard-assets",
+    )
+
+    @app.get("/", include_in_schema=False)
+    async def _index() -> FileResponse:
+        return FileResponse(static_dir / "index.html", media_type="text/html")
+
+    @app.get("/app.js", include_in_schema=False)
+    async def _app_js() -> FileResponse:
+        return FileResponse(static_dir / "app.js", media_type="application/javascript")
+
+    @app.get("/style.css", include_in_schema=False)
+    async def _style_css() -> FileResponse:
+        return FileResponse(static_dir / "style.css", media_type="text/css")
+
+
+def _register_preview_stub(app: FastAPI) -> None:
+    """Stub the HLS preview endpoints.
+
+    The real pipeline (GStreamer ``hlssink2`` writing to a shared directory)
+    will replace these when the worker's GStreamer branch lands on a host
+    with a drone. Until then we return an empty but valid HLS playlist so
+    the dashboard's ``<video>`` element doesn't log noisy fetch errors.
+    """
+
+    placeholder_playlist = (
+        "#EXTM3U\n"
+        "#EXT-X-VERSION:3\n"
+        "#EXT-X-TARGETDURATION:2\n"
+        "#EXT-X-MEDIA-SEQUENCE:0\n"
+        "#EXT-X-PLAYLIST-TYPE:VOD\n"
+        "#EXT-X-ENDLIST\n"
+    )
+
+    @app.get("/preview/stream.m3u8", include_in_schema=False)
+    async def _preview_playlist() -> Response:
+        return Response(
+            content=placeholder_playlist,
+            media_type="application/vnd.apple.mpegurl",
+        )

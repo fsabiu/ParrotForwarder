@@ -1,0 +1,70 @@
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  margin: 0;
+  background: #111;
+  color: #eee;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: #000;
+  border-bottom: 1px solid #222;
+}
+
+h1 { font-size: 1.1rem; margin: 0; }
+h2 { font-size: 0.9rem; margin: 0 0 0.5rem; color: #9cf; }
+
+.state {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.state-disconnected { background: #444; color: #ccc; }
+.state-connecting   { background: #a85; color: #fff; }
+.state-ready        { background: #357; color: #fff; }
+.state-streaming    { background: #283; color: #fff; }
+.state-degraded     { background: #a53; color: #fff; }
+.state-restarting   { background: #a35; color: #fff; }
+
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.panel {
+  background: #181818;
+  border: 1px solid #222;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+dl { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; margin: 0; }
+dt { color: #888; font-size: 0.85rem; }
+dd { margin: 0; font-weight: 500; }
+
+video { width: 100%; border-radius: 4px; background: #000; }
+.hint { color: #777; font-size: 0.75rem; margin: 0.5rem 0 0; }
+
+.controls button {
+  background: #234;
+  color: #fff;
+  border: 1px solid #345;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+}
+.controls button:hover { background: #345; }
+
+.log { grid-column: 1 / -1; max-height: 240px; overflow: auto; }
+.log ol { margin: 0; padding-left: 1.25rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+.log li { padding: 0.15rem 0; border-bottom: 1px solid #222; }

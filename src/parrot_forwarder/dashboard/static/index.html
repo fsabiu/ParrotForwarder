@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ParrotForwarder Dashboard</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>ParrotForwarder</h1>
+    <span id="state-badge" class="state state-disconnected">DISCONNECTED</span>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Status</h2>
+      <dl id="status-dl">
+        <dt>Uptime</dt><dd id="uptime">-</dd>
+        <dt>Restarts</dt><dd id="restarts">0</dd>
+        <dt>Failures</dt><dd id="failures">0</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h2>Telemetry</h2>
+      <dl id="telemetry-dl">
+        <dt>Battery</dt><dd id="battery">-</dd>
+        <dt>GPS fix</dt><dd id="gps">-</dd>
+        <dt>RSSI</dt><dd id="rssi">-</dd>
+        <dt>FPS</dt><dd id="fps">-</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h2>Video preview</h2>
+      <video id="preview" controls muted autoplay playsinline>
+        <source src="/preview/stream.m3u8" type="application/vnd.apple.mpegurl" />
+        Your browser does not support HLS playback; install hls.js or use Safari.
+      </video>
+      <p class="hint">HLS latency ~5 s. For monitoring, not piloting.</p>
+    </section>
+
+    <section class="panel controls">
+      <h2>Controls</h2>
+      <button id="btn-start">Start</button>
+      <button id="btn-stop">Stop</button>
+      <button id="btn-reset">Reset</button>
+    </section>
+
+    <section class="panel log">
+      <h2>Event log</h2>
+      <ol id="event-log"></ol>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
