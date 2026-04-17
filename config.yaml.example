@@ -1,0 +1,49 @@
+# ParrotForwarder v2 example configuration.
+#
+# Copy to /etc/parrot-forwarder/config.yaml (or pass --config /path/to.yaml)
+# and edit. Environment variables PARROT_FORWARDER_<path> override any
+# value set here; CLI flags override both. See v2/specs/02-config.md.
+#
+# Fields marked "reloadable" below can be changed at runtime via SIGHUP.
+# All others require a full restart.
+
+drone:
+  ip: "192.168.53.1"               # IPv4 of the drone over USB tether
+  model: "anafi"                   # only "anafi" is supported in v2
+
+forwarder:
+  srt_port: 8890                   # main MPEG-TS/SRT output
+  klv_port: 12345                  # local UDP; auto-incremented if busy
+  telemetry_fps: 10                # reloadable - KLV update rate (Hz)
+  video_fps: 30                    # informational; drone decides actual rate
+
+supervisor:
+  http:
+    bind: "127.0.0.1"              # NEVER expose externally in v2 (no auth)
+    port: 8080                     # dashboard + REST + WS on this port
+  auto_start: true                 # start forwarding on supervisor boot
+  backoff:
+    base_seconds: 1.0              # first retry delay
+    max_seconds: 60.0              # cap on exponential backoff
+    jitter_seconds: 1.0            # uniform jitter upper bound
+  heartbeat:
+    interval_seconds: 1.0          # forwarder -> supervisor heartbeat cadence
+    timeout_seconds: 5.0           # no heartbeat for this long -> unhealthy
+
+logging:
+  level: "INFO"                    # reloadable - DEBUG|INFO|WARNING|ERROR
+  format: "json"                   # json|text (json required in production)
+  file: "/var/log/parrot-forwarder/forwarder.log"
+  rotation:
+    max_bytes: 10485760            # 10 MB per file
+    backup_count: 5                # keep 5 rotated files
+
+preview:
+  enabled: true                    # dashboard HLS preview branch
+  hls_segment_seconds: 2
+  hls_playlist_size: 3
+  bitrate_kbps: 800                # low-bitrate transcode; main stream untouched
+
+metrics:
+  enabled: true                    # reloadable - /metrics Prometheus endpoint
+  path: "/metrics"
