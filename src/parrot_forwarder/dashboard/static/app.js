@@ -4,6 +4,8 @@
 const state = {
   startedAt: null,
   lastTelemetryAt: null,
+  serviceState: "DISCONNECTED",
+  previewAvailable: false,
 };
 
 const TELEMETRY_FIELDS = [
@@ -49,6 +51,13 @@ function setField(id, value = "-") {
   if (node) node.textContent = value;
 }
 
+function syncPreviewState() {
+  const frame = el("preview-frame");
+  if (!frame) return;
+  const visible = state.previewAvailable && ["STREAMING", "DEGRADED"].includes(state.serviceState);
+  frame.classList.toggle("has-video", visible);
+}
+
 function clearTelemetry() {
   for (const id of TELEMETRY_FIELDS) {
     setField(id, "-");
@@ -59,6 +68,7 @@ function clearTelemetry() {
 
 function setState(name) {
   const badge = el("state-badge");
+  state.serviceState = name;
   badge.textContent = name;
   badge.className = `state state-${name.toLowerCase()}`;
   if (name === "STREAMING" && !state.startedAt) {
@@ -66,9 +76,12 @@ function setState(name) {
   }
   if (!["STREAMING", "DEGRADED"].includes(name)) {
     state.startedAt = null;
+    state.previewAvailable = false;
+    syncPreviewState();
     setField("uptime", "-");
     clearTelemetry();
   }
+  syncPreviewState();
 }
 
 function isNumber(value) {
@@ -233,6 +246,22 @@ function wsUrl(path) {
   return `${proto}://${window.location.host}${path}`;
 }
 
+function setPreviewAvailable(value) {
+  state.previewAvailable = value;
+  syncPreviewState();
+}
+
+function wirePreviewState() {
+  const preview = el("preview");
+  if (!preview) return;
+  for (const eventName of ["loadeddata", "canplay", "playing"]) {
+    preview.addEventListener(eventName, () => setPreviewAvailable(true));
+  }
+  for (const eventName of ["emptied", "abort", "error"]) {
+    preview.addEventListener(eventName, () => setPreviewAvailable(false));
+  }
+}
+
 function connectEventStream() {
   const ws = new WebSocket(wsUrl("/stream/events"));
   ws.addEventListener("message", (evt) => {
@@ -384,6 +413,7 @@ el("btn-reset").addEventListener("click", () =>
 
 clearTelemetry();
 refreshStatus();
+wirePreviewState();
 connectEventStream();
 connectTelemetryStream();
 setInterval(tickTimers, 1000);
