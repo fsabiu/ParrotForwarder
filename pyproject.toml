@@ -48,6 +48,7 @@ dev = [
 
 [project.scripts]
 parrot-forwarder = "parrot_forwarder.cli:main"
+parrot-forwarder-worker = "parrot_forwarder.forwarder.worker:main"
 
 [project.urls]
 Repository = "https://github.com/fsabiu/ParrotForwarder"
@@ -61,6 +62,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 markers = [
     "live: requires a physical Parrot Anafi + Skycontroller. Skipped by default.",
     "slow: takes more than 30 seconds. Skipped by default in the quick loop.",
