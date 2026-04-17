@@ -10,7 +10,7 @@ Phase 0 - Foundation.
 
 ## Current focus
 
-Planning complete. No code tasks in flight yet.
+T01 done. T02 (config loader) is next.
 
 ## Phase progress
 
@@ -26,7 +26,7 @@ Planning complete. No code tasks in flight yet.
 
 | ID | Title | Phase | Status | Owner | Notes |
 |---|---|---|---|---|---|
-| T01 | Project skeleton + pyproject | 0 | todo | - | See [tasks/T01-project-skeleton.md](tasks/T01-project-skeleton.md) |
+| T01 | Project skeleton + pyproject | 0 | done | claude (fsabiu) | src/ layout + pyproject. Merged directly to v2. |
 | T02 | Config loader (YAML + env + CLI) | 0 | todo | - | |
 | T03 | Mock drone backend for tests | 0 | todo | - | |
 | T04 | pytest skeleton + CI | 0 | todo | - | |
@@ -63,3 +63,4 @@ None.
 ## Log
 
 - **2026-04-17** - Branch `v2` created. Planning docs, roadmap, task list, ADR placeholders written. No code changes yet.
+- **2026-04-17** - T01 complete. Moved `parrot_forwarder/` to `src/parrot_forwarder/` via `git mv` (history preserved). Added `pyproject.toml` with `setuptools>=68` build backend, `parrot-forwarder = parrot_forwarder.cli:main` console script, direct deps (`parrot-olympe==0.0.0`, `protobuf==3.20.3`, `PyYAML`), `[project.optional-dependencies].dev` group, and pytest/ruff/mypy tool config. Added `requirements-dev.txt` mirroring the dev group. `ParrotForwarder.py` trimmed to the 3-line shim. `tests/conftest.py` excludes the v1 Olympe-dependent diagnostic scripts from pytest auto-collection so `pytest tests/` runs cleanly on any host. `tests/test_package_layout.py` added as a sanity test (skipped when Olympe is not installed). README install section rewritten around `pip install -e .`. `.gitignore` already covers `build/`, `dist/`, `*.egg-info/`. Full verification (`pip install -e . -r requirements-dev.txt` and `parrot-forwarder --help`) requires the Linux target (Olympe is Linux-only and not available on the dev Mac); pyproject shape and src-layout imports verified locally.

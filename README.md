@@ -484,25 +484,42 @@ python3.11 -m venv drone_env
 source drone_env/bin/activate
 ```
 
-### 4. Install Python Dependencies
+### 4. Install the Package
+
+The project is laid out under `src/parrot_forwarder/` and builds with `pyproject.toml`. Install it in editable mode:
 
 ```bash
-# Install all required packages
-pip install -r requirements.txt
+# Editable install: source changes are picked up without reinstalling
+pip install -e .
+
+# Or, if you prefer the pinned transitive set used on the deployment host:
+pip install -r requirements.txt && pip install -e . --no-deps
+
+# For development (adds pytest, ruff, mypy, httpx, pydantic):
+pip install -e ".[dev]"
+# equivalent to:
+pip install -e . -r requirements-dev.txt
 ```
 
-**Important**: The `requirements.txt` includes `protobuf==3.20.3` which is critical for compatibility with Python 3.11+. Do not upgrade protobuf to 4.x.
+After install, the `parrot-forwarder` console script is on `PATH`:
+
+```bash
+parrot-forwarder --help
+# or, via the v1 shim that still works:
+python ParrotForwarder.py --help
+```
+
+**Important**: `protobuf==3.20.3` is pinned in `pyproject.toml` and must stay below 4.x. Olympe's transitive 3.7.1 is ABI-incompatible with Python 3.11+, and 4.x breaks Olympe's generated messages.
 
 ### 5. Verify Installation
 
 ```bash
-# Test drone connection (with drone powered on and connected)
+# Run the unit test skeleton (no drone required):
+pytest tests/
+
+# Drone-dependent diagnostic scripts (live drone required):
 python tests/test_drone_connection.py
-
-# Test video stream
 python tests/test_video_stream.py
-
-# Test KLV telemetry receiver
 python tests/test_klv_receiver.py --port 12345
 ```
 

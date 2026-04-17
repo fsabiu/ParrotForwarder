@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parrot-forwarder"
+version = "2.0.0.dev0"
+description = "Parrot Anafi telemetry and video forwarder with unified SRT + MISB 0601 KLV stream"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Francesco Sabiu" }]
+requires-python = ">=3.11,<3.12"
+keywords = ["parrot", "anafi", "drone", "uas", "klv", "misb-0601", "srt", "gstreamer"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Multimedia :: Video :: Capture",
+    "Topic :: Scientific/Engineering",
+]
+
+# Runtime dependencies. Only direct imports are listed here; parrot-olympe pulls
+# in its own transitive stack (aenum, boltons, geopy, numpy, requests, ...).
+# The pinned set used for reproducible installs lives in requirements.txt.
+#
+# protobuf MUST stay at 3.20.3: Olympe's transitive 3.7.1 is ABI-incompatible
+# with Python 3.11+, and 4.x breaks Olympe's generated messages. See v1 notes.
+dependencies = [
+    "parrot-olympe==0.0.0",
+    "protobuf==3.20.3",
+    "PyYAML>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+parrot-forwarder = "parrot_forwarder.cli:main"
+
+[project.urls]
+Repository = "https://github.com/fsabiu/ParrotForwarder"
+Issues = "https://github.com/fsabiu/ParrotForwarder/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: requires a physical Parrot Anafi + Skycontroller. Skipped by default.",
+    "slow: takes more than 30 seconds. Skipped by default in the quick loop.",
+]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+warn_unused_ignores = true
+ignore_missing_imports = true
