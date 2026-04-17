@@ -204,3 +204,84 @@ async def _wait_for(
             return
         await asyncio.sleep(poll)
     raise AssertionError(f"predicate {predicate!r} never became true within {timeout}s")
+
+
+# ---------------------------------------------------------------------------
+# Added for T16: scenarios called out in v2/specs/05-testing.md that the
+# original fixtures did not yet cover.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pipeline_error_from_worker_triggers_restart() -> None:
+    workers: list[_FakeWorker] = []
+    sup = Supervisor(
+        worker_factory=_workers_factory(record=workers),
+        sleep=_instant_sleep,
+    )
+    run_task = asyncio.create_task(sup.run())
+
+    await _wait_for(lambda: len(workers) == 1)
+    worker = workers[0]
+    await worker.send_from_worker(ipc_module.OlympeConnectedMsg())
+    await worker.send_from_worker(ipc_module.PipelineStartedMsg())
+    await _wait_for(lambda: sup.state_machine.state == State.STREAMING)
+
+    await worker.send_from_worker(ipc_module.PipelineErrorMsg(reason="bus"))
+    # RESTARTING is transient; the cycle completes when a fresh worker spawns.
+    await _wait_for(lambda: len(workers) >= 2, timeout=2.0)
+    assert workers[0].closed, "original worker must be terminated"
+
+    sup.stop()
+    await asyncio.wait_for(run_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_olympe_disconnect_triggers_restart_cycle() -> None:
+    workers: list[_FakeWorker] = []
+    sup = Supervisor(
+        worker_factory=_workers_factory(record=workers),
+        sleep=_instant_sleep,
+    )
+    run_task = asyncio.create_task(sup.run())
+
+    await _wait_for(lambda: len(workers) == 1)
+    worker = workers[0]
+    await worker.send_from_worker(ipc_module.OlympeConnectedMsg())
+    await worker.send_from_worker(ipc_module.PipelineStartedMsg())
+    await _wait_for(lambda: sup.state_machine.state == State.STREAMING)
+
+    await worker.send_from_worker(ipc_module.OlympeDisconnectedMsg(reason="cable"))
+    await _wait_for(lambda: len(workers) >= 2, timeout=2.0)
+    assert workers[0].closed, "original worker must be terminated"
+
+    sup.stop()
+    await asyncio.wait_for(run_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_consecutive_failures_trigger_growing_backoff() -> None:
+    """Two crashes in a row must result in two ScheduleRestart entries with
+    growing delays. We don't verify the actual sleep duration (that's
+    covered by the pure backoff tests), but we do verify the state machine
+    sees the failures."""
+    workers: list[_FakeWorker] = []
+    policy = BackoffPolicy(base_seconds=0.001, max_seconds=0.1, jitter_seconds=0.0)
+    sup = Supervisor(
+        worker_factory=_workers_factory(record=workers),
+        backoff_policy=policy,
+        sleep=_instant_sleep,
+    )
+    run_task = asyncio.create_task(sup.run())
+
+    await _wait_for(lambda: len(workers) == 1)
+    workers[0].crash(code=137)
+    await _wait_for(lambda: len(workers) == 2)
+    workers[1].crash(code=137)
+    await _wait_for(lambda: len(workers) == 3)
+
+    # consecutive_failures is now > 0, proving the backoff path fired.
+    assert sup.state_machine.backoff.consecutive_failures >= 1
+
+    sup.stop()
+    await asyncio.wait_for(run_task, timeout=1.0)
