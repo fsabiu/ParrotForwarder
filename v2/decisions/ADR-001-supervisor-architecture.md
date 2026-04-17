@@ -1,7 +1,8 @@
 # ADR-001 - Supervisor architecture
 
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-04-17
+**Accepted**: 2026-04-17
 
 ## Context
 
