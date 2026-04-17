@@ -225,6 +225,8 @@ async def _amain(args: argparse.Namespace) -> int:
         process_config = WorkerProcessConfig(
             backend="real" if backend == "subprocess" else "mock",
             drone_ip=cfg.drone.ip,
+            video_ip=cfg.drone.video_ip,
+            device_kind=cfg.drone.device_kind,
             telemetry_fps=cfg.forwarder.telemetry_fps,
             video_fps=cfg.forwarder.video_fps,
             srt_port=cfg.forwarder.srt_port,

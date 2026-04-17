@@ -49,13 +49,13 @@ async def _run_runtime_loop(
 
         try:
             runtime.start()
-            await send(ipc_module.PipelineStartedMsg())
         except Exception as exc:  # noqa: BLE001
             logger.exception("worker start failed")
             await send(ipc_module.PipelineErrorMsg(reason=str(exc)))
             return 1
 
         seq = 0
+        pipeline_started = False
         while not stop_event.is_set():
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_interval)
@@ -67,9 +67,13 @@ async def _run_runtime_loop(
                 await send(ipc_module.OlympeDisconnectedMsg(reason="connection_lost"))
                 return 1
 
-            if not runtime.is_pipeline_running():
-                await send(ipc_module.PipelineErrorMsg(reason="pipeline_stopped"))
-                return 1
+            pipeline_running = runtime.is_pipeline_running()
+            if pipeline_running and not pipeline_started:
+                await send(ipc_module.PipelineStartedMsg())
+                pipeline_started = True
+            elif not pipeline_running and pipeline_started:
+                await send(ipc_module.PipelineErrorMsg(reason="video_unavailable"))
+                pipeline_started = False
 
             snapshot = runtime.telemetry_snapshot()
             if snapshot:
@@ -109,10 +113,12 @@ async def _worker_main(
     heartbeat_interval: float,
 ) -> int:
     logger.info(
-        "worker starting; socket=%s backend=%s drone_ip=%s",
+        "worker starting; socket=%s backend=%s drone_ip=%s video_ip=%s device_kind=%s",
         socket_path,
         backend,
         runtime_config.drone_ip,
+        runtime_config.video_ip or runtime_config.drone_ip,
+        runtime_config.device_kind,
     )
     try:
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
@@ -154,7 +160,7 @@ async def _worker_main(
         )
     finally:
         reader_task.cancel()
-        with suppress(Exception):
+        with suppress(asyncio.CancelledError, Exception):
             await reader_task
         with suppress(Exception):
             writer.close()
@@ -179,6 +185,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Deprecated alias for --backend=mock.",
     )
     parser.add_argument("--drone-ip", default="192.168.53.1")
+    parser.add_argument("--video-ip", default=None)
+    parser.add_argument(
+        "--device-kind",
+        choices=("drone", "skycontroller"),
+        default="drone",
+    )
     parser.add_argument("--telemetry-fps", type=int, default=10)
     parser.add_argument("--video-fps", type=int, default=30)
     parser.add_argument("--srt-port", type=int, default=8890)
@@ -207,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
                 backend=args.backend,
                 runtime_config=RuntimeConfig(
                     drone_ip=args.drone_ip,
+                    video_ip=args.video_ip,
+                    device_kind=args.device_kind,
                     telemetry_fps=args.telemetry_fps,
                     video_fps=args.video_fps,
                     srt_port=args.srt_port,

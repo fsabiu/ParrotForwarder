@@ -91,6 +91,8 @@ def yaml_file(tmp_path: Path) -> Path:
 def test_defaults_when_no_layers_provided() -> None:
     cfg = load_config()
     assert cfg.drone.ip == "192.168.53.1"
+    assert cfg.drone.video_ip is None
+    assert cfg.drone.device_kind == "drone"
     assert cfg.drone.model == "anafi"
     assert cfg.forwarder.srt_port == 8890
     assert cfg.forwarder.klv_port == 12345
@@ -111,6 +113,8 @@ def test_defaults_when_no_layers_provided() -> None:
 def test_valid_yaml_maps_to_model(yaml_file: Path) -> None:
     cfg = load_config(path=yaml_file)
     assert cfg.drone.ip == "10.0.0.42"
+    assert cfg.drone.video_ip is None
+    assert cfg.drone.device_kind == "drone"
     assert cfg.forwarder.srt_port == 9000
     assert cfg.forwarder.telemetry_fps == 20
     assert cfg.supervisor.http.port == 8081

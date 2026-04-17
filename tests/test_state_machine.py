@@ -89,7 +89,7 @@ def test_state_timeouts_mirror_spec() -> None:
     """spec check: STATE_TIMEOUT_SECONDS must match state-machine.md."""
     assert STATE_TIMEOUT_SECONDS[State.DISCONNECTED] is None
     assert STATE_TIMEOUT_SECONDS[State.CONNECTING] == 30.0
-    assert STATE_TIMEOUT_SECONDS[State.READY] == 10.0
+    assert STATE_TIMEOUT_SECONDS[State.READY] is None
     assert STATE_TIMEOUT_SECONDS[State.STREAMING] is None
     assert STATE_TIMEOUT_SECONDS[State.DEGRADED] == 15.0
     assert STATE_TIMEOUT_SECONDS[State.RESTARTING] == 5.0
@@ -119,7 +119,7 @@ def test_olympe_connected_in_connecting_moves_to_ready() -> None:
     sm = _sm(State.CONNECTING)
     effects = sm.step(OlympeConnected())
     assert sm.state == State.READY
-    assert _pick(effects, SetTimeout)[0].seconds == 10.0
+    assert _pick(effects, SetTimeout)[0].seconds is None
 
 
 def test_pipeline_started_in_ready_moves_to_streaming() -> None:
@@ -154,6 +154,13 @@ def test_pipeline_error_in_streaming_goes_to_restarting() -> None:
     assert _pick(effects, KillForwarder)
 
 
+def test_video_unavailable_in_streaming_returns_to_ready() -> None:
+    sm = _sm(State.STREAMING)
+    effects = sm.step(PipelineError(reason="video_unavailable"))
+    assert sm.state == State.READY
+    assert _pick(effects, KillForwarder) == []
+
+
 def test_pipeline_eos_in_streaming_goes_to_restarting() -> None:
     sm = _sm(State.STREAMING)
     sm.step(PipelineEos())
@@ -165,6 +172,13 @@ def test_pipeline_error_in_ready_goes_to_restarting() -> None:
     effects = sm.step(PipelineError(reason="bus"))
     assert sm.state == State.RESTARTING
     assert _pick(effects, KillForwarder)
+
+
+def test_video_unavailable_in_ready_stays_ready() -> None:
+    sm = _sm(State.READY)
+    effects = sm.step(PipelineError(reason="video_unavailable"))
+    assert sm.state == State.READY
+    assert _pick(effects, KillForwarder) == []
 
 
 def test_olympe_error_in_connecting_schedules_restart_with_backoff() -> None:
@@ -183,11 +197,11 @@ def test_connecting_timeout_schedules_restart_and_goes_disconnected() -> None:
     assert _pick(effects, ScheduleRestart)
 
 
-def test_ready_timeout_goes_to_restarting() -> None:
+def test_ready_timeout_is_illegal_noop() -> None:
     sm = _sm(State.READY)
     effects = sm.step(Timeout())
-    assert sm.state == State.RESTARTING
-    assert _pick(effects, KillForwarder)
+    assert sm.state == State.READY
+    assert _pick(effects, KillForwarder) == []
 
 
 def test_degraded_timeout_goes_to_restarting() -> None:

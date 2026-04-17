@@ -237,6 +237,31 @@ async def test_pipeline_error_from_worker_triggers_restart() -> None:
 
 
 @pytest.mark.asyncio
+async def test_video_unavailable_from_worker_returns_to_ready_without_restart() -> None:
+    workers: list[_FakeWorker] = []
+    sup = Supervisor(
+        worker_factory=_workers_factory(record=workers),
+        sleep=_instant_sleep,
+    )
+    run_task = asyncio.create_task(sup.run())
+
+    await _wait_for(lambda: len(workers) == 1)
+    worker = workers[0]
+    await worker.send_from_worker(ipc_module.OlympeConnectedMsg())
+    await worker.send_from_worker(ipc_module.PipelineStartedMsg())
+    await _wait_for(lambda: sup.state_machine.state == State.STREAMING)
+
+    await worker.send_from_worker(ipc_module.PipelineErrorMsg(reason="video_unavailable"))
+    await _wait_for(lambda: sup.state_machine.state == State.READY)
+    await asyncio.sleep(0.05)
+    assert len(workers) == 1
+    assert not workers[0].closed
+
+    sup.stop()
+    await asyncio.wait_for(run_task, timeout=1.0)
+
+
+@pytest.mark.asyncio
 async def test_olympe_disconnect_triggers_restart_cycle() -> None:
     workers: list[_FakeWorker] = []
     sup = Supervisor(

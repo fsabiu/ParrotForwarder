@@ -30,6 +30,7 @@ class ParrotForwarder:
     def __init__(self, drone_ip, telemetry_fps=10, video_fps=30,
                  srt_port=8890, klv_port_start=12345, auto_reconnect=True,
                  health_check_interval=5, video_stats_interval=30,
+                 video_ip: str | None = None,
                  drone_factory: Optional[Callable[[str], Any]] = None,
                  install_signal_handlers: bool = True):
         """
@@ -44,6 +45,8 @@ class ParrotForwarder:
             auto_reconnect: Enable automatic reconnection on drone disconnect (default: True)
             health_check_interval: Seconds between connection health checks (default: 5)
             video_stats_interval: Seconds between video status reports (default: 30)
+            video_ip: Optional RTSP endpoint when video is exposed on a
+                different address than control/telemetry.
             drone_factory: Callable ``(ip) -> drone`` used to build the Olympe
                 handle. Defaults to an internal factory that lazily imports
                 Olympe. Tests inject ``MockDrone`` (or a partially-applied
@@ -56,6 +59,7 @@ class ParrotForwarder:
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
         
         self.drone_ip = drone_ip
+        self.video_ip = video_ip or drone_ip
         self.telemetry_fps = telemetry_fps
         self.video_fps = video_fps
         self.srt_port = srt_port
@@ -243,7 +247,8 @@ class ParrotForwarder:
         
         self.logger.info("=" * 60)
         self.logger.info("Starting Parrot Forwarder")
-        self.logger.info(f"  Drone IP: {self.drone_ip}")
+        self.logger.info(f"  Control IP: {self.drone_ip}")
+        self.logger.info(f"  Video IP: {self.video_ip}")
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
         self.logger.info(f"  Telemetry Format: KLV (MISB 0601) -> localhost:{self.klv_port}")
         self.logger.info(f"  Video FPS: {self.video_fps} (streaming at original drone framerate)")
@@ -269,7 +274,7 @@ class ParrotForwarder:
             self.klv_port
         )
         self.video_forwarder = VideoForwarder(
-            self.drone_ip,
+            self.video_ip,
             self.srt_port,
             self.klv_port,
             self.video_stats_interval,
@@ -418,4 +423,3 @@ class ParrotForwarder:
             # Print summary
             if connection_attempts > 0:
                 self.logger.info(f"Session summary: {connection_attempts} reconnection(s) performed")
-

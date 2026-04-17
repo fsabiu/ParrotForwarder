@@ -7,7 +7,7 @@
 3. **Programmatic control** - REST endpoints for start/stop/status/reset and a WebSocket stream for live telemetry and events, so the dashboard and future integrations use the same contract.
 4. **Observability** - structured JSON logs with rotation, Prometheus-style metrics, and enough session history to diagnose a 1 am outage without an SSH session.
 5. **Testability without a drone** - mock Olympe backend, fake GStreamer pipeline, and an in-process SRT receiver fixture so unit and integration tests run in CI without hardware.
-6. **Reproducible install** - one command (`make install` / `./scripts/install.sh`) or one compose command (`docker compose up -d --build`) brings a fresh Ubuntu 24.04 ARM64 host from empty to running service; no copy-paste from README.
+6. **Reproducible install** - one command (`make install` / `./scripts/install.sh`) or one compose command (`docker compose up -d --build`) brings a fresh Ubuntu 24.04 ARM64 host from empty to running service; no copy-paste from README. Docker on the Ubuntu VM is the authoritative deployment path for demos and customer-facing runs.
 7. **Truthful, complete telemetry** - publish every practically extractable Olympe field needed by the current geolocation/COP pipeline: raw GPS validity + accuracies, home/RTH state, absolute and relative gimbal attitude, gimbal and camera offsets, zoom/FOV/focal data, link quality, storage, product/version, and motor-flight stats.
 
 ## Non-goals (v2)
@@ -23,7 +23,7 @@
 - **Python 3.11** - Olympe SDK requires this. Stays pinned via pyenv.
 - **protobuf==3.20.3** - Olympe's transitive `protobuf==3.7.1` must be force-reinstalled to 3.20.3 (see v1 SETUP_NOTES).
 - **System GStreamer** - do not mix with Conda's gstreamer. Install via apt.
-- **Parrot Anafi + Skycontroller 3** is the only hardware target. Connection is USB tether, drone reachable at `192.168.53.1`.
+- **Parrot Anafi + Skycontroller 3** is the only hardware target. Control may be direct USB/RNDIS (`192.168.53.1`) or a stable controller-over-LAN cable path where the controller has a normal LAN IP. The runtime must support separate control and video endpoints and keep `READY` truthful when control is up but video is not.
 - **Ubuntu 24.04 LTS ARM64** is the new target OS (v1 was on 25.04 non-LTS). LTS gives us 5 years and deadsnakes python3.11 support.
 - **No breaking changes to the SRT output** - the video pipeline and muxed KLV stay wire-compatible with v1 consumers (detection pipeline).
 
@@ -41,7 +41,7 @@
 |---|---|---|
 | Entry point | `ParrotForwarder.py` CLI script | `parrot-forwarder` console script; daemon + CLI subcommands (`run`, `status`, `reset`) |
 | Process model | Single process, two threads (telemetry + video) | Supervisor process + forwarder subprocess; supervisor survives forwarder crashes |
-| Reconnection | Checks `BatteryStateChanged` every N seconds | State machine with explicit transitions (disconnected -> connecting -> ready -> streaming -> degraded -> restarting), exponential backoff, per-state timeouts, and health across Olympe AND GStreamer |
+| Reconnection | Checks `BatteryStateChanged` every N seconds | State machine with explicit transitions (disconnected -> connecting -> ready -> streaming -> degraded -> restarting), exponential backoff, truthful READY-vs-STREAMING behavior, and health across Olympe AND GStreamer |
 | Config | 9 CLI flags | `config.yaml` (default `/etc/parrot-forwarder/config.yaml`), CLI flags override |
 | Logs | Plain text to stdout / journald | Structured JSON to file (rotating) + stdout; log level per module |
 | Control | SIGTERM only | REST API: `POST /control/start`, `/control/stop`, `/control/reset`; WebSocket `/stream/events` |
@@ -89,7 +89,7 @@ Full design in [architecture/overview.md](architecture/overview.md). State trans
 ## Success criteria
 
 1. Power-cycle the drone mid-stream. Dashboard shows `degraded` for a few seconds, then `streaming` again, without any human action. SRT consumer sees a brief freeze but no process restart.
-2. Unplug the Skycontroller USB for 30 seconds and plug it back in. Same result.
+2. Unplug the Skycontroller cable path (USB/RNDIS or controller-LAN cable) for 30 seconds and plug it back in. Control auto-recovers; if RTSP is still absent the state remains `READY` rather than faking `STREAMING`.
 3. Kill `-9` the forwarder subprocess. Supervisor restarts it within 5 seconds.
 4. Open `http://localhost:8080` on the host, `http://<machine-ip>:8080` on the LAN, or the host's VPN/Tailscale IP. See truthful connection state, telemetry validity, gimbal/camera data, and a "Reset" button that works.
 5. `pytest` passes end-to-end on a machine with no drone connected. `pytest -m live` passes on a machine with a drone.

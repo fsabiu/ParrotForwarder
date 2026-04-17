@@ -8,7 +8,9 @@
 # All others require a full restart.
 
 drone:
-  ip: "192.168.53.1"               # IPv4 of the drone over USB tether
+  ip: "192.168.53.1"               # IPv4 of the control endpoint (direct drone or SkyController)
+  video_ip: null                   # optional separate RTSP endpoint; defaults to drone.ip
+  device_kind: "drone"             # "drone" for direct USB/RNDIS, "skycontroller" for controller LAN mode
   model: "anafi"                   # only "anafi" is supported in v2
 
 forwarder:

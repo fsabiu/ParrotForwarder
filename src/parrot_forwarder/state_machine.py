@@ -51,7 +51,7 @@ class State(StrEnum):
 STATE_TIMEOUT_SECONDS: dict[State, float | None] = {
     State.DISCONNECTED: None,
     State.CONNECTING: 30.0,
-    State.READY: 10.0,
+    State.READY: None,
     State.STREAMING: None,
     State.DEGRADED: 15.0,
     State.RESTARTING: 5.0,
@@ -459,6 +459,11 @@ def _on_pipeline_eos(sm: StateMachine, _event: PipelineEos) -> list[SideEffect]:
 
 
 def _on_pipeline_error(sm: StateMachine, event: PipelineError) -> list[SideEffect]:
+    if event.reason == "video_unavailable":
+        if sm.state == State.READY:
+            return sm._stay(reason="video_unavailable_while_ready")
+        if sm.state in (State.STREAMING, State.DEGRADED):
+            return sm._transition(State.READY, reason="video_unavailable")
     if sm.state in (State.READY, State.STREAMING, State.DEGRADED):
         return sm._transition(
             State.RESTARTING,
@@ -527,12 +532,6 @@ def _on_timeout(sm: StateMachine, _event: Timeout) -> list[SideEffect]:
             reason="connecting_timeout",
             extra=extras,
         )
-    if sm.state == State.READY:
-        return sm._transition(
-            State.RESTARTING,
-            reason="ready_timeout",
-            extra=[KillForwarder()],
-        )
     if sm.state == State.DEGRADED:
         return sm._transition(
             State.RESTARTING,
@@ -545,7 +544,7 @@ def _on_timeout(sm: StateMachine, _event: Timeout) -> list[SideEffect]:
             reason="restarting_grace_expired",
             extra=[KillForwarder(grace_seconds=0.0)],
         )
-    # DISCONNECTED and STREAMING have no timeout; a fired Timeout here is a
+    # DISCONNECTED, READY, and STREAMING have no timeout; a fired Timeout here is a
     # dispatcher bug but we don't crash.
     return [sm._illegal(_event, reason=f"timeout in {sm.state.value}")]
 

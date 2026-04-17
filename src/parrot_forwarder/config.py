@@ -50,7 +50,18 @@ class DroneConfig(BaseModel):
 
     model_config = _STRICT
 
-    ip: str = Field(default="192.168.53.1", description="IPv4 of the drone over USB tether")
+    ip: str = Field(
+        default="192.168.53.1",
+        description="IPv4 of the Olympe control endpoint (direct drone or SkyController)",
+    )
+    video_ip: str | None = Field(
+        default=None,
+        description="Optional IPv4 of the RTSP video endpoint; defaults to drone.ip",
+    )
+    device_kind: Literal["drone", "skycontroller"] = Field(
+        default="drone",
+        description="How Olympe should connect to drone.ip",
+    )
     model: Literal["anafi"] = Field(default="anafi", description="Only 'anafi' is supported in v2")
 
 

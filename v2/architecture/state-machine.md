@@ -6,7 +6,7 @@
 |---|---|---|---|
 | `DISCONNECTED` | No forwarder running. Initial state. | none | - |
 | `CONNECTING` | Forwarder subprocess spawned; Olympe trying to reach drone. | 30 s | -> `DISCONNECTED`, schedule restart with backoff |
-| `READY` | Olympe connected; GStreamer not yet started. | 10 s | -> `RESTARTING` |
+| `READY` | Olympe connected; telemetry/control live, video not yet available. | none | - |
 | `STREAMING` | Pipeline active, heartbeats healthy. | none | - |
 | `DEGRADED` | Pipeline active but one or more health signals failing. | 15 s | -> `RESTARTING` |
 | `RESTARTING` | Terminating forwarder, about to re-spawn. | 5 s (graceful), then SIGKILL | -> `CONNECTING` |
@@ -20,7 +20,7 @@ From the forwarder (over IPC):
 - `olympe.error(reason)` - fatal olympe error
 - `pipeline.started` - GStreamer pipeline playing
 - `pipeline.eos` - end-of-stream (source gone)
-- `pipeline.error(reason)` - bus error
+- `pipeline.error(reason)` - pipeline fault; `reason=video_unavailable` means control stayed up but RTSP is not live
 - `heartbeat(seq, metrics)` - every 1 s
 - `exit(code)` - child died
 
@@ -43,10 +43,11 @@ CONNECTING   + olympe.connected     -> READY
 CONNECTING   + olympe.error         -> DISCONNECTED (backoff)
 CONNECTING   + timeout              -> DISCONNECTED (backoff)
 READY        + pipeline.started     -> STREAMING
-READY        + pipeline.error       -> RESTARTING
-READY        + timeout              -> RESTARTING
+READY        + pipeline.error(video_unavailable) -> READY
+READY        + pipeline.error(other) -> RESTARTING
 STREAMING    + olympe.disconnected  -> RESTARTING
-STREAMING    + pipeline.error       -> RESTARTING
+STREAMING    + pipeline.error(video_unavailable) -> READY
+STREAMING    + pipeline.error(other) -> RESTARTING
 STREAMING    + pipeline.eos         -> RESTARTING
 STREAMING    + health.unresponsive  -> DEGRADED
 STREAMING    + health.degraded      -> DEGRADED
@@ -68,7 +69,7 @@ Restart delay = `min(max_delay, base_delay * 2^(consecutive_failures - 1)) + jit
 - `jitter` = uniform random in `[0, 1)` seconds
 - `consecutive_failures` resets to 0 after 60 s of continuous `STREAMING`.
 
-Rationale: aggressive first retry (drones often just power-cycle), but no tight loop against a sustained fault (bad cable, dead battery).
+Rationale: aggressive first retry (drones often just power-cycle), but no tight loop against a sustained fault (bad cable, dead battery). `READY` intentionally has no timeout so the operator can see truthful "controller up / video absent" behavior without a restart storm.
 
 ## Metrics exported
 

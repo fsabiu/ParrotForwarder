@@ -9,8 +9,9 @@ hosts without Olympe installed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Literal, Protocol
 
 from ..main import ParrotForwarder
 
@@ -20,6 +21,8 @@ class RuntimeConfig:
     """Configuration passed from the supervisor to the worker runtime."""
 
     drone_ip: str = "192.168.53.1"
+    video_ip: str | None = None
+    device_kind: Literal["drone", "skycontroller"] = "drone"
     telemetry_fps: int = 10
     video_fps: int = 30
     srt_port: int = 8890
@@ -67,6 +70,19 @@ def _compact(data: dict[str, object]) -> dict[str, object]:
 def _axis_bounds(minimum: object, maximum: object) -> dict[str, object] | None:
     bounds = _compact({"min": minimum, "max": maximum})
     return bounds or None
+
+
+def _make_olympe_factory(
+    device_kind: Literal["drone", "skycontroller"],
+) -> Callable[[str], object]:
+    def _factory(ip: str) -> object:
+        import olympe
+
+        if device_kind == "skycontroller":
+            return olympe.SkyController(ip)
+        return olympe.Drone(ip)
+
+    return _factory
 
 
 def _normalize_telemetry(snapshot: dict[str, object]) -> dict[str, object]:
@@ -359,6 +375,7 @@ class V1ForwarderRuntime:
     def __post_init__(self) -> None:
         self._forwarder = ParrotForwarder(
             drone_ip=self.config.drone_ip,
+            video_ip=self.config.video_ip,
             telemetry_fps=self.config.telemetry_fps,
             video_fps=self.config.video_fps,
             srt_port=self.config.srt_port,
@@ -366,6 +383,7 @@ class V1ForwarderRuntime:
             auto_reconnect=False,
             health_check_interval=int(self.config.connect_retry_interval),
             video_stats_interval=self.config.video_stats_interval,
+            drone_factory=_make_olympe_factory(self.config.device_kind),
             install_signal_handlers=False,
         )
 
@@ -389,12 +407,11 @@ class V1ForwarderRuntime:
 
     def is_pipeline_running(self) -> bool:
         video = self._forwarder.video_forwarder
-        return bool(
-            self._forwarder._is_forwarding
-            and video is not None
-            and video.gst_process is not None
-            and video.gst_process.poll() is None
-        )
+        if not self._forwarder._is_forwarding or video is None:
+            return False
+        if hasattr(video, "is_streaming"):
+            return bool(video.is_streaming())
+        return bool(video.gst_process is not None and video.gst_process.poll() is None)
 
     def telemetry_snapshot(self) -> dict[str, object]:
         telemetry = self._forwarder.telemetry_forwarder

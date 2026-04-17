@@ -32,6 +32,8 @@ class WorkerProcessConfig:
 
     backend: str
     drone_ip: str
+    video_ip: str | None
+    device_kind: str
     telemetry_fps: int
     video_fps: int
     srt_port: int
@@ -42,7 +44,7 @@ class WorkerProcessConfig:
     log_level: str
 
     def argv(self, socket_path: Path) -> list[str]:
-        return [
+        args = [
             sys.executable,
             "-m",
             "parrot_forwarder.forwarder.worker",
@@ -52,6 +54,8 @@ class WorkerProcessConfig:
             self.backend,
             "--drone-ip",
             self.drone_ip,
+            "--device-kind",
+            self.device_kind,
             "--telemetry-fps",
             str(self.telemetry_fps),
             "--video-fps",
@@ -69,6 +73,9 @@ class WorkerProcessConfig:
             "--log-level",
             self.log_level,
         ]
+        if self.video_ip is not None:
+            args.extend(["--video-ip", self.video_ip])
+        return args
 
 
 def build_subprocess_worker_factory(
@@ -134,6 +141,8 @@ def build_subprocess_worker_factory(
                     await on_message(message)
             except asyncio.CancelledError:
                 raise
+            except ConnectionResetError:
+                logger.info("worker IPC connection reset")
             except Exception:  # noqa: BLE001
                 logger.exception("worker IPC reader raised")
             finally:

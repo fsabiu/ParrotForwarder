@@ -65,6 +65,7 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "/control/start" in response.text, "dashboard JS must hit REST contract"
     assert "/stream/events" in response.text
     assert "preview-frame" in response.text
+    assert '"READY"' in response.text
 
 
 def test_dashboard_css_served(client: TestClient) -> None:

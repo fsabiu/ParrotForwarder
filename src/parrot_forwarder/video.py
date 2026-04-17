@@ -7,9 +7,7 @@ import subprocess
 import signal
 import logging
 import time
-import sys
 import threading
-import olympe
 
 logger = logging.getLogger("VideoForwarder")
 
@@ -25,7 +23,7 @@ class VideoForwarder(threading.Thread):
         Initialize the video forwarder.
         
         Args:
-            drone_ip: IP address of the drone
+            drone_ip: IP address of the RTSP endpoint
             srt_port: Port for SRT output stream
             klv_port: Local UDP port for KLV telemetry data
             stats_interval: Seconds between status reports (default: 30)
@@ -40,6 +38,8 @@ class VideoForwarder(threading.Thread):
         self.use_high_latency = use_high_latency
         self.gst_process = None
         self._stop_event = threading.Event()
+        self.pipeline_playing = False
+        self.reconnect_delay_seconds = 2.0
         
         # Statistics tracking
         self.stats_interval = stats_interval
@@ -73,11 +73,25 @@ class VideoForwarder(threading.Thread):
                 elif 'error' in line_lower or 'critical' in line_lower:
                     self.gst_errors += 1
                     logger.error(f"GStreamer: {line}")
-                elif 'state change' in line_lower and 'playing' in line_lower:
-                    logger.info("GStreamer pipeline state: PLAYING")
+                elif (
+                    ('state change' in line_lower and 'playing' in line_lower)
+                    or 'setting pipeline to playing' in line_lower
+                    or 'new clock:' in line_lower
+                ):
+                    if not self.pipeline_playing:
+                        self.pipeline_playing = True
+                        logger.info("GStreamer pipeline state: PLAYING")
                     
         except Exception as e:
             logger.debug(f"Error reading GStreamer stderr: {e}")
+
+    def is_streaming(self) -> bool:
+        """Whether the pipeline is actively in a streaming-capable state."""
+        return bool(
+            self.pipeline_playing
+            and self.gst_process is not None
+            and self.gst_process.poll() is None
+        )
     
     def _build_low_latency_pipeline(self, drone_rtsp_url):
         """
@@ -176,8 +190,10 @@ class VideoForwarder(threading.Thread):
             uptime_str = time.strftime("%H:%M:%S", time.gmtime(uptime))
             
             # Check process health
-            if self.gst_process and self.gst_process.poll() is None:
+            if self.is_streaming():
                 status = "✓ STREAMING"
+            elif self.gst_process and self.gst_process.poll() is None:
+                status = "… CONNECTING"
             else:
                 status = "✗ STOPPED"
             
@@ -200,83 +216,87 @@ class VideoForwarder(threading.Thread):
         
         drone_rtsp_url = f"rtsp://{self.drone_ip}/live"
         
-        # Note: Skipping availability check as GStreamer will handle connection
-        logger.info("Starting GStreamer (will connect to drone RTSP stream)...")
-        
-        logger.info(f"Streaming video from {drone_rtsp_url} via SRT")
+        logger.info("Video forwarder started; waiting for RTSP at %s", drone_rtsp_url)
         logger.info(f"Muxing with KLV data from localhost:{self.klv_port}")
-        
-        # Select pipeline based on network quality
-        if self.use_high_latency:
-            logger.info("Using HIGH-LATENCY pipeline (better for poor networks)")
-            pipeline = self._build_high_latency_pipeline(drone_rtsp_url)
-        else:
-            logger.info("Using LOW-LATENCY pipeline (better for good networks)")
-            pipeline = self._build_low_latency_pipeline(drone_rtsp_url)
-        
-        # Use system GStreamer (not Anaconda's old version)
-        cmd = ["/usr/bin/gst-launch-1.0", "-e"] + pipeline.split()
-        
-        logger.info(f"Starting GStreamer pipeline")
-        logger.info(f"Stream available at: srt://<your-ip>:{self.srt_port}")
-        logger.info(f"  Input 0: Video (H.264) from RTSP")
-        logger.info(f"  Input 1: Data (KLV) from TS stream on UDP:{self.klv_port}")
-        
-        try:
-            self.gst_process = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            # Start monitoring stderr in separate thread
+
+        if self.start_time is None:
+            self.start_time = time.time()
+
+        check_interval = 1
+        while not self._stop_event.is_set():
+            self.pipeline_playing = False
+
+            if self.use_high_latency:
+                logger.info("Using HIGH-LATENCY pipeline (better for poor networks)")
+                pipeline = self._build_high_latency_pipeline(drone_rtsp_url)
+            else:
+                logger.info("Using LOW-LATENCY pipeline (better for good networks)")
+                pipeline = self._build_low_latency_pipeline(drone_rtsp_url)
+
+            cmd = ["/usr/bin/gst-launch-1.0", "-e"] + pipeline.split()
+
+            logger.info("Starting GStreamer pipeline")
+            logger.info(f"Stream available at: srt://<your-ip>:{self.srt_port}")
+            logger.info("  Input 0: Video (H.264) from RTSP")
+            logger.info(f"  Input 1: Data (KLV) from TS stream on UDP:{self.klv_port}")
+
+            try:
+                self.gst_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            except Exception as e:
+                logger.error(f"Error starting GStreamer: {e}")
+                if self._stop_event.wait(self.reconnect_delay_seconds):
+                    break
+                continue
+
             self.stderr_thread = threading.Thread(
                 target=self._monitor_gstreamer_stderr,
                 daemon=True,
                 name="GStreamerStderrMonitor"
             )
             self.stderr_thread.start()
-            
-            logger.info(f"✓ SRT stream started on port {self.srt_port}")
+
+            logger.info(f"✓ SRT listener started on port {self.srt_port}")
             logger.info(f"  Input: {drone_rtsp_url}")
             logger.info(f"  Clients can connect: srt://<your-ip>:{self.srt_port}")
-            
-            # Initialize timing for status reports
-            self.start_time = time.time()
-            self.last_stats_time = self.start_time
-            
-            # Monitor GStreamer process
-            check_interval = 1  # Check every second
+
+            self.last_stats_time = time.time()
             while not self._stop_event.is_set():
-                # Check if process is still running
                 if self.gst_process.poll() is not None:
-                    # Process terminated unexpectedly
-                    logger.error(f"✗ GStreamer process terminated unexpectedly (exit code: {self.gst_process.returncode})")
-                    
-                    # Try to get remaining output
+                    logger.warning(
+                        "GStreamer pipeline stopped (exit code: %s)",
+                        self.gst_process.returncode,
+                    )
                     try:
                         remaining_stderr = self.gst_process.stderr.read()
                         if remaining_stderr:
                             logger.error(f"Final GStreamer output: {remaining_stderr}")
-                    except:
+                    except Exception:
                         pass
-                    
                     break
-                
-                # Log periodic status
+
                 self._log_status()
-                
                 time.sleep(check_interval)
-            
-            # Final status
-            if self.start_time:
-                total_uptime = time.time() - self.start_time
-                uptime_str = time.strftime("%H:%M:%S", time.gmtime(total_uptime))
-                logger.info(f"Video streaming session ended - Total uptime: {uptime_str}")
-                
-        except Exception as e:
-            logger.error(f"Error starting GStreamer: {e}")
+
+            self.pipeline_playing = False
+            self.gst_process = None
+            if self._stop_event.is_set():
+                break
+            logger.info(
+                "RTSP stream unavailable; retrying GStreamer in %ss",
+                self.reconnect_delay_seconds,
+            )
+            if self._stop_event.wait(self.reconnect_delay_seconds):
+                break
+
+        if self.start_time:
+            total_uptime = time.time() - self.start_time
+            uptime_str = time.strftime("%H:%M:%S", time.gmtime(total_uptime))
+            logger.info(f"Video streaming session ended - Total uptime: {uptime_str}")
     
     def _wait_for_drone_video_ready(self, rtsp_url, timeout=30):
         """
@@ -326,6 +346,7 @@ class VideoForwarder(threading.Thread):
                 logger.warning("GStreamer did not stop gracefully, killing...")
                 self.gst_process.kill()
             self.gst_process = None
+        self.pipeline_playing = False
         
         logger.info("✓ Video forwarder stopped")
 
@@ -333,4 +354,3 @@ class VideoForwarder(threading.Thread):
 if __name__ == "__main__":
     print("VideoForwarder is designed to be used as part of ParrotForwarder")
     print("Usage: python -m parrot_forwarder.main --help")
-

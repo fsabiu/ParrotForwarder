@@ -8,7 +8,10 @@ skip to [Quick diagnostic flow](#quick-diagnostic-flow).
 
 - Ubuntu 24.04 LTS ARM64.
 - User `pf` with sudo (or `oracle` on legacy hosts).
-- Parrot Anafi + Skycontroller 3 on USB; drone reachable at `192.168.53.1`.
+- Parrot Anafi + Skycontroller 3.
+- Control path can be either:
+  - direct USB/RNDIS from the Linux host to the controller/drone (`192.168.53.1`), or
+  - controller-over-LAN cable mode, where `drone.ip` is the SkyController's LAN IP and `drone.device_kind: skycontroller`.
 
 ## Install (cold)
 
@@ -62,6 +65,19 @@ Compose uses:
 
 If you want a host-managed config instead of the image default, uncomment the
 config bind mount in `docker-compose.yml`.
+
+For controller-over-LAN cable mode, mount a config with:
+
+```yaml
+drone:
+  ip: "192.168.1.136"          # controller LAN IP
+  video_ip: null               # or set explicitly if RTSP is on a different IP
+  device_kind: "skycontroller"
+```
+
+If the controller IP responds to ping but refuses Parrot control/video ports,
+the cable adapter chain is not exposing a usable SDK endpoint yet. In that
+case the service should sit in `DISCONNECTED` or `READY`, not fake `STREAMING`.
 
 ## Upgrade
 
@@ -118,6 +134,8 @@ docker compose logs --tail=200 parrot-forwarder
 
 # 4. Is the drone reachable?
 ping -c 3 192.168.53.1
+# or, for controller-over-LAN:
+ping -c 3 <controller-ip>
 
 # 5. Is GStreamer happy?
 gst-inspect-1.0 mpegtsmux srtsink | head
@@ -131,9 +149,11 @@ sudo ss -lpn | grep 8890
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `state: DISCONNECTED`, many restarts | Skycontroller USB flapping | reseat cable; check `dmesg \| grep usb` |
+| `state: READY`, telemetry present, no preview | control link is up but RTSP not live yet | check drone/camera state; if using controller-over-LAN, verify the controller actually exposes Parrot ports on its LAN IP |
 | `POST /control/start` returns 409 | worker backend disabled on this host | use Linux + Olympe + GStreamer, or run the Docker compose deployment on the target machine |
 | `state: DEGRADED`, signal=fps | video pipeline stalled | restart via `POST /control/reset`; if persists, `sudo journalctl -u parrot_forwarder \| grep pipeline.error` |
 | `state: STREAMING` but no video at client | network / firewall | `ufw allow 8890`; verify SRT locally: `ffplay srt://localhost:8890` |
+| controller LAN IP pings but ports `180/554/44444-44447` are refused | incompatible USB-Ethernet adapter / dock path | replace the adapter chain; keep the Mac out of the USB path and use a known-good controller Ethernet path |
 | Dashboard blank / 404 | wrong port | confirm `supervisor.http.port` in `config.yaml` and `ss -lpn \| grep 8080` |
 | `protobuf 4.x` error | env corruption | re-run `./scripts/install.sh` - it force-reinstalls `protobuf==3.20.3` |
 

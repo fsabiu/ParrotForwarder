@@ -79,6 +79,8 @@ function setState(name) {
     state.previewAvailable = false;
     syncPreviewState();
     setField("uptime", "-");
+  }
+  if (!["STREAMING", "DEGRADED", "READY"].includes(name)) {
     clearTelemetry();
   }
   syncPreviewState();

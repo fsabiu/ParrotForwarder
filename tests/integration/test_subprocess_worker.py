@@ -22,6 +22,8 @@ async def test_subprocess_worker_factory_streams_mock_worker_events() -> None:
         WorkerProcessConfig(
             backend="mock",
             drone_ip="192.168.53.1",
+            video_ip=None,
+            device_kind="drone",
             telemetry_fps=10,
             video_fps=30,
             srt_port=8890,
