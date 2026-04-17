@@ -15,30 +15,80 @@
   <main>
     <section class="panel">
       <h2>Status</h2>
-      <dl id="status-dl">
+      <dl>
         <dt>Uptime</dt><dd id="uptime">-</dd>
         <dt>Restarts</dt><dd id="restarts">0</dd>
         <dt>Failures</dt><dd id="failures">0</dd>
+        <dt>Last telemetry</dt><dd id="last-telemetry">-</dd>
       </dl>
     </section>
 
     <section class="panel">
-      <h2>Telemetry</h2>
-      <dl id="telemetry-dl">
+      <h2>Summary</h2>
+      <dl>
         <dt>Battery</dt><dd id="battery">-</dd>
         <dt>GPS fix</dt><dd id="gps">-</dd>
+        <dt>Position valid</dt><dd id="position-valid">-</dd>
+        <dt>Satellites</dt><dd id="satellites">-</dd>
         <dt>RSSI</dt><dd id="rssi">-</dd>
         <dt>FPS</dt><dd id="fps">-</dd>
       </dl>
     </section>
 
     <section class="panel">
-      <h2>Video preview</h2>
+      <h2>Position</h2>
+      <dl>
+        <dt>Source</dt><dd id="position-source">-</dd>
+        <dt>Message</dt><dd id="position-message">-</dd>
+        <dt>Coordinates</dt><dd id="position-coords">-</dd>
+        <dt>Altitudes</dt><dd id="position-altitudes">-</dd>
+        <dt>Accuracy</dt><dd id="position-accuracy">-</dd>
+        <dt>Home</dt><dd id="home-coords">-</dd>
+        <dt>KLV fallback</dt><dd id="klv-coords">-</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h2>Gimbal</h2>
+      <dl>
+        <dt>Absolute</dt><dd id="gimbal-abs">-</dd>
+        <dt>Relative</dt><dd id="gimbal-rel">-</dd>
+        <dt>Offsets</dt><dd id="gimbal-offsets">-</dd>
+        <dt>Frames</dt><dd id="gimbal-frames">-</dd>
+        <dt>Bounds</dt><dd id="gimbal-offset-bounds">-</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h2>Camera</h2>
+      <dl>
+        <dt>Optics</dt><dd id="camera-optics">-</dd>
+        <dt>Recording</dt><dd id="camera-recording">-</dd>
+        <dt>Alignment</dt><dd id="camera-alignment">-</dd>
+        <dt>Align bounds</dt><dd id="camera-alignment-bounds">-</dd>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h2>Flight</h2>
+      <dl>
+        <dt>State</dt><dd id="flying-state">-</dd>
+        <dt>Alert</dt><dd id="alert-state">-</dd>
+        <dt>Return home</dt><dd id="return-home">-</dd>
+        <dt>Heading lock</dt><dd id="heading-lock">-</dd>
+        <dt>Wind</dt><dd id="wind">-</dd>
+        <dt>Vibration</dt><dd id="vibration">-</dd>
+        <dt>Hover warning</dt><dd id="hovering-warning">-</dd>
+      </dl>
+    </section>
+
+    <section class="panel preview">
+      <h2>Video Preview</h2>
       <video id="preview" controls muted autoplay playsinline>
         <source src="/preview/stream.m3u8" type="application/vnd.apple.mpegurl" />
         Your browser does not support HLS playback; install hls.js or use Safari.
       </video>
-      <p class="hint">HLS latency ~5 s. For monitoring, not piloting.</p>
+      <p class="hint">Blank preview means the HLS branch is not producing live segments yet.</p>
     </section>
 
     <section class="panel controls">
@@ -46,6 +96,20 @@
       <button id="btn-start">Start</button>
       <button id="btn-stop">Stop</button>
       <button id="btn-reset">Reset</button>
+    </section>
+
+    <section class="panel">
+      <h2>Platform</h2>
+      <dl>
+        <dt>Product</dt><dd id="product-info">-</dd>
+        <dt>Motor flights</dt><dd id="flight-hours">-</dd>
+        <dt>Storage</dt><dd id="storage-info">-</dd>
+      </dl>
+    </section>
+
+    <section class="panel raw">
+      <h2>Telemetry JSON</h2>
+      <pre id="telemetry-json">{}</pre>
     </section>
 
     <section class="panel log">

@@ -47,8 +47,10 @@ def test_dashboard_index_served(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-cache"
     assert "ParrotForwarder" in response.text
     assert "state-badge" in response.text  # hook-up point for JS
+    assert "telemetry-json" in response.text
     assert "app.js" in response.text
     assert "style.css" in response.text
 
@@ -57,6 +59,7 @@ def test_dashboard_js_served(client: TestClient) -> None:
     response = client.get("/app.js")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/javascript")
+    assert response.headers["cache-control"] == "no-cache"
     assert "/control/start" in response.text, "dashboard JS must hit REST contract"
     assert "/stream/events" in response.text
 
@@ -65,6 +68,7 @@ def test_dashboard_css_served(client: TestClient) -> None:
     response = client.get("/style.css")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/css")
+    assert response.headers["cache-control"] == "no-cache"
 
 
 def test_preview_stream_returns_valid_m3u8(client: TestClient) -> None:

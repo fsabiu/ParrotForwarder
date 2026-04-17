@@ -34,8 +34,8 @@ class MISB0601Encoder:
     TAG_PLATFORM_HEADING = 7    # Platform heading angle (degrees)
     
     # --- NEW: MISB 0601 Tags for Gimbal and Camera ---
-    TAG_SENSOR_H_FOV = 18       # Sensor horizontal field of view (degrees)
-    TAG_SENSOR_V_FOV = 19       # Sensor vertical field of view (degrees)
+    TAG_SENSOR_H_FOV = 16       # Sensor horizontal field of view (degrees)
+    TAG_SENSOR_V_FOV = 17       # Sensor vertical field of view (degrees)
     TAG_SENSOR_REL_ROLL = 21    # Sensor relative roll angle (degrees)
     TAG_SENSOR_REL_PITCH = 22   # Sensor relative elevation angle (degrees)
     TAG_SENSOR_REL_YAW = 23     # Sensor relative azimuth angle (degrees)
@@ -389,14 +389,25 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
                 encoder.add_heading(yaw_deg)
         
         # --- NEW: ADD CAMERA SENSOR PARAMETERS (static data) ---
-        if 'camera_sensor_width' in telemetry and telemetry['camera_sensor_width'] is not None:
-            encoder.add_sensor_width(float(telemetry['camera_sensor_width']))
-        
-        if 'camera_sensor_height' in telemetry and telemetry['camera_sensor_height'] is not None:
-            encoder.add_sensor_height(float(telemetry['camera_sensor_height']))
-        
-        if 'camera_focal_length' in telemetry and telemetry['camera_focal_length'] is not None:
-            encoder.add_focal_length(float(telemetry['camera_focal_length']))
+        sensor_width = telemetry.get('camera_sensor_width', telemetry.get('camera_sensor_width_mm'))
+        if sensor_width is not None:
+            encoder.add_sensor_width(float(sensor_width))
+
+        sensor_height = telemetry.get('camera_sensor_height', telemetry.get('camera_sensor_height_mm'))
+        if sensor_height is not None:
+            encoder.add_sensor_height(float(sensor_height))
+
+        focal_length = telemetry.get('camera_focal_length', telemetry.get('camera_focal_length_mm'))
+        if focal_length is not None:
+            encoder.add_focal_length(float(focal_length))
+
+        sensor_h_fov = telemetry.get('sensor_h_fov', telemetry.get('camera_h_fov_deg'))
+        if sensor_h_fov is not None:
+            encoder.add_sensor_h_fov(float(sensor_h_fov))
+
+        sensor_v_fov = telemetry.get('sensor_v_fov', telemetry.get('camera_v_fov_deg'))
+        if sensor_v_fov is not None:
+            encoder.add_sensor_v_fov(float(sensor_v_fov))
         
         # --- NEW: ADD GIMBAL STATE ---
         # Send BOTH relative and absolute gimbal angles
@@ -432,4 +443,3 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
         logger = logging.getLogger(__name__)
         logger.error(f"KLV encoding error: {e}", exc_info=True)
         return None
-

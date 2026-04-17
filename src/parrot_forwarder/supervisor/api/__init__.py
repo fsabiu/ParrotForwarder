@@ -233,6 +233,7 @@ def _register_dashboard(app: FastAPI) -> None:
     static_dir = dashboard_static_dir()
     if not static_dir.is_dir():
         return
+    no_cache = {"Cache-Control": "no-cache"}
     app.mount(
         "/assets",
         StaticFiles(directory=str(static_dir)),
@@ -241,15 +242,27 @@ def _register_dashboard(app: FastAPI) -> None:
 
     @app.get("/", include_in_schema=False)
     async def _index() -> FileResponse:
-        return FileResponse(static_dir / "index.html", media_type="text/html")
+        return FileResponse(
+            static_dir / "index.html",
+            media_type="text/html",
+            headers=no_cache,
+        )
 
     @app.get("/app.js", include_in_schema=False)
     async def _app_js() -> FileResponse:
-        return FileResponse(static_dir / "app.js", media_type="application/javascript")
+        return FileResponse(
+            static_dir / "app.js",
+            media_type="application/javascript",
+            headers=no_cache,
+        )
 
     @app.get("/style.css", include_in_schema=False)
     async def _style_css() -> FileResponse:
-        return FileResponse(static_dir / "style.css", media_type="text/css")
+        return FileResponse(
+            static_dir / "style.css",
+            media_type="text/css",
+            headers=no_cache,
+        )
 
 
 def _register_preview_stub(app: FastAPI) -> None:

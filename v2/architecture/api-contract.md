@@ -89,17 +89,56 @@ Client sends nothing. Connection drops when supervisor exits.
 
 ### `ws://localhost:8080/stream/telemetry`
 
-Server-to-client telemetry stream at supervisor-rate-limited 10 Hz. JSON per tick, shape matches the KLV fields but as decoded primitives (easier for dashboards than raw KLV).
+Server-to-client telemetry stream at supervisor-rate-limited 10 Hz. JSON per tick. The payload keeps the top-level summary metrics the dashboard needs immediately, plus grouped telemetry sections and the raw flat snapshot for debugging/downstream consumers.
 
 ```
 {
   "t": "2026-04-17T14:25:03.101Z",
-  "gps": { "lat": 45.4642, "lon": 9.1900, "alt_msl_m": 124.3 },
-  "attitude": { "roll_deg": -1.2, "pitch_deg": 3.4, "yaw_deg": 87.1 },
-  "gimbal": { "yaw_deg": 0.0, "pitch_deg": -45.0, "roll_deg": 0.0 },
-  "camera": { "w": 1280, "h": 720, "focal_mm": 4.0 },
-  "battery_percent": 77,
-  "speed_mps": { "x": 1.2, "y": 0.0, "z": -0.1 }
+  "payload": {
+    "timestamp": "2026-04-17T14:25:03.101Z",
+    "sequence": 140,
+    "battery_percent": 77,
+    "gps_fix": false,
+    "position_valid": false,
+    "rssi_dbm": -58,
+    "position": {
+      "valid": false,
+      "source": "default",
+      "message": "gps_fix_unavailable",
+      "is_default": true,
+      "satellites": 0,
+      "altitude_msl_m": 124.3,
+      "altitude_agl_m": 18.5,
+      "ground_altitude_msl_m": 105.8,
+      "klv": {
+        "latitude": 36.71549,
+        "longitude": -4.28795,
+        "altitude_msl_m": 10.0
+      },
+      "raw": {
+        "gps_location": { "latitude": 500.0, "longitude": 500.0, "altitude_msl_m": 124.3 }
+      }
+    },
+    "attitude": { "roll_deg": -1.2, "pitch_deg": 3.4, "yaw_deg": 87.1, "heading_deg": 87.1 },
+    "gimbal": {
+      "absolute_deg": { "yaw": 0.0, "pitch": -45.0, "roll": 0.0 },
+      "relative_deg": { "yaw": 0.0, "pitch": -45.0, "roll": 0.0 },
+      "offset_deg": { "yaw": 0.0, "pitch": 0.0, "roll": 0.0 }
+    },
+    "camera": {
+      "sensor_width_mm": 6.3,
+      "sensor_height_mm": 4.7,
+      "focal_length_mm": 23.0,
+      "zoom_level": 1.0,
+      "h_fov_deg": 76.6,
+      "v_fov_deg": 59.3
+    },
+    "signal": { "rssi_dbm": -58, "link_quality_level": 5, "probable_4g_interference": false },
+    "flight": { "state": "hovering", "return_home": { "state": "available", "reason": "finished" } },
+    "storage": { "free_space_mb": 1820, "recording_time_remaining_min": 48, "photo_remaining": 350 },
+    "system": { "product_name": "Anafi", "software_version": "1.8.2" },
+    "raw": { "...": "full flat snapshot omitted here" }
+  }
 }
 ```
 
@@ -109,7 +148,7 @@ Rate is configurable by query: `?rate=2` for 2 Hz, capped at drone's native upda
 
 ### `GET /`
 
-Dashboard SPA. Caches aggressively (`Cache-Control: max-age=86400`) for hashed assets, `no-cache` for `index.html`.
+Dashboard SPA. Until the assets are fingerprinted, `index.html`, `app.js`, and `style.css` are all served with `Cache-Control: no-cache` so operators do not get a stale UI after a hotfix deployment.
 
 ### `GET /preview/stream.m3u8` and `GET /preview/segment-*.ts`
 
