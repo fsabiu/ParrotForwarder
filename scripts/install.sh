@@ -9,7 +9,7 @@
 #   1. Check OS (warn only if not Ubuntu 24.04).
 #   2. apt-get install the GStreamer / SDL / OpenCV / build toolchain.
 #   3. Install pyenv if missing (pinned commit).
-#   4. Install Python 3.11.11 via pyenv if missing.
+#   4. Install Python 3.11.10 via pyenv if missing.
 #   5. Create project-local .venv against that interpreter.
 #   6. pip install -e . plus requirements-dev.txt.
 #   7. Force-reinstall protobuf 3.20.3 over Olympe's 3.7.1 transitive.
@@ -31,7 +31,7 @@ set -euo pipefail
 readonly PYENV_REPO="https://github.com/pyenv/pyenv.git"
 readonly PYENV_PIN="v2.4.17"
 
-readonly PYTHON_VERSION="3.11.11"
+readonly PYTHON_VERSION="3.11.10"
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly VENV_DIR="${REPO_ROOT}/.venv"
@@ -144,7 +144,7 @@ install_pyenv() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. Python 3.11.11
+# 4. Python 3.11.10
 # ---------------------------------------------------------------------------
 
 install_python() {

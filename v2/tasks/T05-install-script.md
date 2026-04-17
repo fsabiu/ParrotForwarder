@@ -14,8 +14,8 @@ Single-command bootstrap of a fresh Ubuntu 24.04 ARM64 host to a running ParrotF
   - Verifies Ubuntu 24.04 (warn if different, do not abort).
   - Installs apt deps: gstreamer stack, libsdl2, libjpeg, libopencv, build-essential.
   - Installs pyenv if not present (official installer, pinned commit).
-  - Installs Python 3.11.11 via pyenv if not present.
-  - Creates `.venv` at project root with pyenv 3.11.11.
+  - Installs Python 3.11.10 via pyenv if not present.
+  - Creates `.venv` at project root with pyenv 3.11.10.
   - Runs `pip install -e . -r requirements-dev.txt`.
   - Force-reinstalls `protobuf==3.20.3` (guard against Olympe's 3.7.1 transitive).
   - Verifies `gst-inspect-1.0 mpegtsmux` and `gst-inspect-1.0 srtsink` return non-zero exit codes.

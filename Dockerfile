@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 
 ARG PYENV_VERSION=v2.4.17
-ARG PYTHON_VERSION=3.11.11
+ARG PYTHON_VERSION=3.11.10
 
 RUN git clone --branch ${PYENV_VERSION} --depth 1 \
         https://github.com/pyenv/pyenv.git /root/.pyenv \

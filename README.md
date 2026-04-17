@@ -453,7 +453,7 @@ What `scripts/install.sh` does, idempotently:
 1. Verifies the host is Ubuntu 24.04 (warns if not; does not abort).
 2. `apt-get install`s the GStreamer stack (`gstreamer1.0-{tools,plugins-*,libav,rtsp}`) plus SDL2 / OpenCV / build toolchain dependencies Olympe needs.
 3. Installs [pyenv](https://github.com/pyenv/pyenv) (pinned tag) if missing.
-4. Builds Python 3.11.11 via pyenv (one-time, ~3 min).
+4. Builds Python 3.11.10 via pyenv (one-time, ~3 min).
 5. Creates a project-local `.venv` against that interpreter.
 6. `pip install -e .` + `-r requirements-dev.txt`.
 7. Force-reinstalls `protobuf==3.20.3` over Olympe's 3.7.1 transitive (the reason Python 3.11 works at all).
