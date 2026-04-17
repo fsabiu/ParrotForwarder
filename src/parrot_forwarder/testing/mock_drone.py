@@ -23,9 +23,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
-
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +71,11 @@ class MockSubscription:
     """
 
     message_name: str
-    _timeout: Optional[float] = None
+    _timeout: float | None = None
     _unsubscribed: bool = False
     calls: list[str] = field(default_factory=list)
 
-    def wait(self, timeout: Optional[float] = None) -> "MockSubscription":
+    def wait(self, timeout: float | None = None) -> MockSubscription:
         self.calls.append(f"wait(timeout={timeout})")
         self._timeout = timeout
         return self
@@ -113,8 +113,8 @@ class MockDrone:
 
         # Configurable behavior (test knobs).
         self._connect_delay_seconds: float = 0.1
-        self._fail_next_connect: Optional[Exception] = None
-        self._raise_on_next_get_state: Optional[Exception] = None
+        self._fail_next_connect: Exception | None = None
+        self._raise_on_next_get_state: Exception | None = None
         self._state: dict[str, dict[str, Any]] = _default_state()
 
         # Subscription bookkeeping so tests can assert "this was subscribed".
@@ -147,7 +147,7 @@ class MockDrone:
         logger.debug("MockDrone(%s) disconnected", self.ip)
         return True
 
-    def get_state(self, message_class: Any) -> Optional[dict[str, Any]]:
+    def get_state(self, message_class: Any) -> dict[str, Any] | None:
         """Mirror ``olympe.Drone.get_state(MessageClass)``.
 
         Looks up state by ``message_class.__name__`` so tests can pass
@@ -181,7 +181,7 @@ class MockDrone:
         with self._lock:
             self._connect_delay_seconds = float(seconds)
 
-    def fail_next_connect(self, exc: Optional[Exception] = None) -> None:
+    def fail_next_connect(self, exc: Exception | None = None) -> None:
         """Arm the next :meth:`connect` to raise ``exc`` (default ConnectionError)."""
         with self._lock:
             self._fail_next_connect = exc or ConnectionError("simulated connect failure")
@@ -191,7 +191,7 @@ class MockDrone:
         with self._lock:
             self._connected = False
 
-    def raise_on_next_get_state(self, exc: Optional[Exception] = None) -> None:
+    def raise_on_next_get_state(self, exc: Exception | None = None) -> None:
         """Arm the next :meth:`get_state` call to raise ``exc`` once."""
         with self._lock:
             self._raise_on_next_get_state = exc or RuntimeError(

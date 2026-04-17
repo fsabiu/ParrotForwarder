@@ -42,6 +42,8 @@ dev = [
     "pydantic>=2.6",
     "ruff>=0.4",
     "mypy>=1.10",
+    "PyYAML>=6.0",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -68,9 +70,29 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Legacy v1 modules are exempt from lint until they're rewritten in Phase 1/2.
+# v2 code must pass cleanly.
+extend-exclude = [
+    "src/parrot_forwarder/telemetry.py",
+    "src/parrot_forwarder/video.py",
+    "src/parrot_forwarder/main.py",
+    "src/parrot_forwarder/cli.py",
+    "src/parrot_forwarder/klv_encoder.py",
+    "ParrotForwarder.py",
+    "tests/test_drone_connection.py",
+    "tests/test_klv_receiver.py",
+    "tests/test_mediamtx_integration.py",
+    "tests/test_telemetry_receiver.py",
+    "tests/test_video_receiver.py",
+    "tests/test_video_sender.py",
+    "tests/test_video_stream.py",
+    "tests/run_tests.py",
+]
 
-[tool.mypy]
-python_version = "3.11"
-strict_optional = true
-warn_unused_ignores = true
-ignore_missing_imports = true
+[tool.ruff.lint]
+# Start conservative: pyflakes + pycodestyle basics + isort. We can tighten
+# as more v2 code lands.
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length - handled by the formatter
+]

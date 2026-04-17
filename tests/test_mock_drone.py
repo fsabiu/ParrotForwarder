@@ -24,7 +24,6 @@ import pytest
 from parrot_forwarder.testing import MockDrone, MockSubscription
 from parrot_forwarder.testing.mock_drone import mock_drone_factory
 
-
 # ---------------------------------------------------------------------------
 # Connect / disconnect
 # ---------------------------------------------------------------------------

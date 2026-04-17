@@ -9,3 +9,8 @@ httpx>=0.27
 pydantic>=2.6
 ruff>=0.4
 mypy>=1.10
+# PyYAML is a runtime dep (used by parrot_forwarder.config) but also
+# needed in CI so the v2 test suite runs without having to resolve
+# the full Olympe dep tree. Listed here too for convenience.
+PyYAML>=6.0
+types-PyYAML>=6.0

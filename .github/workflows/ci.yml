@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+    branches: [main, v2]
+
+# Cancel stale runs when a newer commit lands on the same branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    name: lint + typecheck + pytest (no-live)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-dev.txt
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      # parrot-olympe is Linux-only and requires system libs we do not provision
+      # on the GitHub runner. The v2 test suite (config, mock drone, state
+      # machine, etc.) does not need Olympe at runtime, so we install the
+      # package with --no-deps and pull just the dev tooling.
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install package (no deps)
+        run: pip install -e . --no-deps
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Mypy (strict on v2 modules)
+        run: mypy src/parrot_forwarder
+
+      - name: Pytest (exclude live + slow)
+        run: pytest -m "not live and not slow" -v

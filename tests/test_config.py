@@ -23,14 +23,13 @@ from textwrap import dedent
 import pytest
 
 from parrot_forwarder.config import (
+    RELOADABLE_PATHS,
     Config,
     ConfigError,
-    RELOADABLE_PATHS,
     ReloadResult,
     load_config,
     reload_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -22,8 +22,9 @@ See ``v2/specs/02-config.md`` for the authoritative schema.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Literal, Mapping, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -230,9 +231,9 @@ _ENV_PREFIX = "PARROT_FORWARDER_"
 
 
 def load_config(
-    path: Optional[Path] = None,
-    env: Optional[Mapping[str, str]] = None,
-    cli_overrides: Optional[Mapping[str, Any]] = None,
+    path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    cli_overrides: Mapping[str, Any] | None = None,
 ) -> Config:
     """Load config applying the documented layering.
 
@@ -318,7 +319,7 @@ def reload_config(old: Config, new: Config) -> ReloadResult:
 # ---------------------------------------------------------------------------
 
 
-def _load_yaml_layer(path: Optional[Path]) -> dict[str, Any]:
+def _load_yaml_layer(path: Path | None) -> dict[str, Any]:
     if path is None:
         return {}
     try:
