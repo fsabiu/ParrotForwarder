@@ -8,10 +8,17 @@ import logging
 import time
 import signal
 import socket
-import olympe
+from typing import Any, Callable, Optional
 
-from .telemetry import TelemetryForwarder
-from .video import VideoForwarder
+
+def _default_drone_factory(ip: str) -> Any:
+    """Default drone factory - lazily imports Olympe so hosts without it
+    (dev laptops, CI) can still construct a :class:`ParrotForwarder` when
+    a test injects its own ``drone_factory``.
+    """
+    import olympe
+
+    return olympe.Drone(ip)
 
 
 class ParrotForwarder:
@@ -20,12 +27,14 @@ class ParrotForwarder:
     Manages both telemetry and video forwarding threads.
     """
     
-    def __init__(self, drone_ip, telemetry_fps=10, video_fps=30, 
+    def __init__(self, drone_ip, telemetry_fps=10, video_fps=30,
                  srt_port=8890, klv_port_start=12345, auto_reconnect=True,
-                 health_check_interval=5, video_stats_interval=30):
+                 health_check_interval=5, video_stats_interval=30,
+                 drone_factory: Optional[Callable[[str], Any]] = None,
+                 install_signal_handlers: bool = True):
         """
         Initialize the Parrot forwarder.
-        
+
         Args:
             drone_ip: IP address of the drone
             telemetry_fps: Frames per second for telemetry forwarding
@@ -35,6 +44,14 @@ class ParrotForwarder:
             auto_reconnect: Enable automatic reconnection on drone disconnect (default: True)
             health_check_interval: Seconds between connection health checks (default: 5)
             video_stats_interval: Seconds between video status reports (default: 30)
+            drone_factory: Callable ``(ip) -> drone`` used to build the Olympe
+                handle. Defaults to an internal factory that lazily imports
+                Olympe. Tests inject ``MockDrone`` (or a partially-applied
+                factory) to exercise the forwarder without hardware.
+            install_signal_handlers: If False, skip installing SIGINT/SIGTERM
+                handlers. Tests that construct :class:`ParrotForwarder` in
+                a non-main thread (or where signal installation is unwanted)
+                set this to False.
         """
         self.logger = logging.getLogger(f"{__name__}.ParrotForwarder")
         
@@ -55,13 +72,17 @@ class ParrotForwarder:
         # Stats settings
         self.video_stats_interval = video_stats_interval
         
+        # Dependency injection point for the Olympe Drone.
+        self._drone_factory: Callable[[str], Any] = drone_factory or _default_drone_factory
+
         # Find available port for KLV telemetry
         self.klv_port = self._find_free_port(klv_port_start)
         self.logger.info(f"KLV telemetry port selected: {self.klv_port}")
-        
+
         # Set up signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        if install_signal_handlers:
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully."""
@@ -124,7 +145,7 @@ class ParrotForwarder:
             max_retries: Maximum number of connection attempts (None = infinite)
             retry_interval: Seconds to wait between retries
         """
-        self.drone = olympe.Drone(self.drone_ip)
+        self.drone = self._drone_factory(self.drone_ip)
         
         attempt = 0
         while True:
@@ -235,9 +256,15 @@ class ParrotForwarder:
             self.logger.info(f"  Auto-reconnect: DISABLED")
         self.logger.info("=" * 60)
         
+        # Lazy import: the telemetry and video modules pull in Olympe and
+        # GStreamer respectively, which are Linux-only. Deferring the import
+        # keeps ``parrot_forwarder.main`` importable on dev hosts.
+        from .telemetry import TelemetryForwarder
+        from .video import VideoForwarder
+
         # Create forwarders
         self.telemetry_forwarder = TelemetryForwarder(
-            self.drone, 
+            self.drone,
             self.telemetry_fps,
             self.klv_port
         )
