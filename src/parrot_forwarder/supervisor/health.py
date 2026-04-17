@@ -19,7 +19,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from ..state_machine import HealthDegraded, HealthUnresponsive, Heartbeat
+from ..state_machine import Event, HealthDegraded, HealthUnresponsive, Heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +72,9 @@ class HealthMonitor:
 
     def record_heartbeat(
         self, hb: Heartbeat, metrics: dict[str, float] | None = None
-    ) -> list[object]:
+    ) -> list[Event]:
         """Process a heartbeat. Returns state-machine events to post."""
-        events: list[object] = []
+        events: list[Event] = []
         self._last_heartbeat_at = self.now_fn()
         self._last_seq = hb.seq
         if self._unresponsive_emitted:
@@ -88,9 +88,9 @@ class HealthMonitor:
         events.extend(self._check_rssi(metrics))
         return events
 
-    def poll(self) -> list[object]:
+    def poll(self) -> list[Event]:
         """Periodic call. Returns state-machine events to post."""
-        events: list[object] = []
+        events: list[Event] = []
         if self._last_heartbeat_at is None:
             # Never received a heartbeat - the supervisor hasn't told us the
             # worker is running yet; don't fire.
@@ -117,7 +117,7 @@ class HealthMonitor:
     # Signal checks
     # ------------------------------------------------------------------
 
-    def _check_fps(self, metrics: dict[str, float]) -> list[object]:
+    def _check_fps(self, metrics: dict[str, float]) -> list[Event]:
         fps = metrics.get("fps")
         if fps is None:
             return []
@@ -139,7 +139,7 @@ class HealthMonitor:
         self._degraded_signals.discard("fps")
         return []
 
-    def _check_battery(self, metrics: dict[str, float]) -> list[object]:
+    def _check_battery(self, metrics: dict[str, float]) -> list[Event]:
         battery = metrics.get("battery_percent")
         if battery is None:
             return []
@@ -151,7 +151,7 @@ class HealthMonitor:
         self._degraded_signals.discard("battery")
         return []
 
-    def _check_rssi(self, metrics: dict[str, float]) -> list[object]:
+    def _check_rssi(self, metrics: dict[str, float]) -> list[Event]:
         rssi = metrics.get("rssi_dbm")
         if rssi is None:
             return []
@@ -171,7 +171,7 @@ class HealthMonitor:
 
 async def run_health_poll_loop(
     monitor: HealthMonitor,
-    post_event: Callable[[object], Awaitable[None]],
+    post_event: Callable[[Event], Awaitable[None]],
     interval_seconds: float = 1.0,
 ) -> None:
     """Tight loop that calls :meth:`HealthMonitor.poll` and posts events.

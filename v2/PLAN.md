@@ -7,14 +7,14 @@
 3. **Programmatic control** - REST endpoints for start/stop/status/reset and a WebSocket stream for live telemetry and events, so the dashboard and future integrations use the same contract.
 4. **Observability** - structured JSON logs with rotation, Prometheus-style metrics, and enough session history to diagnose a 1 am outage without an SSH session.
 5. **Testability without a drone** - mock Olympe backend, fake GStreamer pipeline, and an in-process SRT receiver fixture so unit and integration tests run in CI without hardware.
-6. **Reproducible install** - one command (`make install` or `./install.sh`) brings a fresh Ubuntu 24.04/25.04 ARM64 VM from empty to running service; no copy-paste from README.
+6. **Reproducible install** - one command (`make install` / `./scripts/install.sh`) or one compose command (`docker compose up -d --build`) brings a fresh Ubuntu 24.04 ARM64 host from empty to running service; no copy-paste from README.
 
 ## Non-goals (v2)
 
 - Multi-drone support. One drone per process stays the model.
 - Cloud streaming endpoints. SRT out stays localhost/LAN; cloud is v3.
 - Replacing the v1 KLV encoder. It works; wrap it, don't rewrite it.
-- Authentication on the dashboard. Localhost-only binding is the security boundary for v2.
+- Authentication on the dashboard. Default bare-metal binding stays loopback-only; trusted LAN/VPN exposure via explicit `0.0.0.0` config or Docker compose is allowed for site deployments.
 - Replacing GStreamer. The pipeline shape stays; we wrap it with health monitoring.
 
 ## Constraints
@@ -41,7 +41,7 @@
 | Metrics | None | Prometheus `/metrics` endpoint (FPS, bitrate, uptime, reconnects, drone RSSI, battery %) |
 | Tests | 7 scripts all requiring live drone | pytest suite with mock drone; `--live` marker for hardware tests |
 | Install | Manual, 6 shell blocks in README | `./scripts/install.sh` - idempotent, handles pyenv + apt + venv + pip |
-| Packaging | Raw source + systemd unit | Python wheel + Dockerfile + updated systemd unit with dashboard port |
+| Packaging | Raw source + systemd unit | Python wheel + Dockerfile + docker-compose + updated systemd unit with dashboard port |
 
 ## Architecture summary
 
@@ -82,9 +82,9 @@ Full design in [architecture/overview.md](architecture/overview.md). State trans
 1. Power-cycle the drone mid-stream. Dashboard shows `degraded` for a few seconds, then `streaming` again, without any human action. SRT consumer sees a brief freeze but no process restart.
 2. Unplug the Skycontroller USB for 30 seconds and plug it back in. Same result.
 3. Kill `-9` the forwarder subprocess. Supervisor restarts it within 5 seconds.
-4. Open `http://localhost:8080` on the host. See connection status, battery %, GPS fix, a video preview, and a "Reset" button that works.
+4. Open `http://localhost:8080` on the host, or `http://<machine-ip>:8080` for the compose deployment. See connection status, battery %, GPS fix, a video preview, and a "Reset" button that works.
 5. `pytest` passes end-to-end on a machine with no drone connected. `pytest -m live` passes on a machine with a drone.
-6. Fresh Ubuntu 24.04 ARM64 VM -> `./scripts/install.sh` -> `systemctl start parrot-forwarder` -> dashboard reachable - all in under 15 minutes with no manual steps.
+6. Fresh Ubuntu 24.04 ARM64 host -> `./scripts/install.sh` + `systemctl start parrot_forwarder`, or `docker compose up -d --build` -> dashboard reachable - all in under 15 minutes with no manual steps.
 
 ## Out of scope / deferred to v3
 

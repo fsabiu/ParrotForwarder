@@ -162,6 +162,7 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
         sm = supervisor.state_machine
         return StatusResponse(
             state=sm.state.value,
+            restarts_total=supervisor.restart_count,
             consecutive_failures=sm.backoff.consecutive_failures,
         )
 
@@ -185,6 +186,11 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
         summary="Start forwarding (idempotent)",
     )
     async def _start() -> dict[str, str]:
+        if not supervisor.start_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="worker backend disabled on this host",
+            )
         await supervisor.post_event(UserStart())
         return {"state": supervisor.state_machine.state.value}
 

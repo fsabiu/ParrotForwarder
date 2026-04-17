@@ -85,7 +85,7 @@ RUN mkdir -p /etc/parrot-forwarder \
 
 EXPOSE 8080 8890 12345/udp
 
-ENTRYPOINT ["/opt/pf/.venv/bin/parrot-forwarder"]
+ENTRYPOINT ["/opt/pf/.venv/bin/parrot-forwarder-supervisor", "--config", "/etc/parrot-forwarder/config.yaml"]
 
 # ---------------------------------------------------------------------------
 # Running
@@ -97,6 +97,7 @@ ENTRYPOINT ["/opt/pf/.venv/bin/parrot-forwarder"]
 #     docker run --rm --name pf \
 #         --device=/dev/bus/usb \
 #         --network host \
+#         -e PARROT_FORWARDER_SUPERVISOR__HTTP__BIND=0.0.0.0 \
 #         -v /etc/parrot-forwarder/config.yaml:/etc/parrot-forwarder/config.yaml:ro \
 #         ghcr.io/fsabiu/parrot-forwarder:2.0.0
 #

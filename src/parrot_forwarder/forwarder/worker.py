@@ -1,22 +1,10 @@
 """
 Forwarder subprocess entry point.
 
-Run via ``python -m parrot_forwarder.forwarder.worker --socket PATH`` or via
-the installed ``parrot-forwarder-worker`` console script. The worker:
-
-  1. Connects back to the supervisor over the UDS at ``--socket``.
-  2. Instantiates a :class:`parrot_forwarder.main.ParrotForwarder` with
-     real Olympe (unless ``--mock`` is given, in which case it uses the
-     :class:`parrot_forwarder.testing.MockDrone` factory).
-  3. Emits IPC events (``olympe.connected``, ``pipeline.started``,
-     ``heartbeat``, ...) to the supervisor on state changes.
-  4. Listens for ``stop`` / ``set_telemetry_rate`` commands from the
-     supervisor.
-
-The worker deliberately contains no retry logic of its own - the
-supervisor owns the state machine. The worker's job is to be a dumb
-pipe: "try to run the forwarder, shout about what happens, exit when
-told to".
+The worker owns the hardware-facing runtime. It connects to the supervisor over
+the configured Unix-domain socket, reports real lifecycle events, emits
+heartbeat/telemetry frames while the controller is attached, and exits on
+disconnect or pipeline failure so the supervisor can drive retries.
 """
 
 from __future__ import annotations
@@ -25,19 +13,107 @@ import argparse
 import asyncio
 import logging
 import sys
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeAlias
 
 from .. import ipc as ipc_module
+from .runtime import ForwarderRuntime, RuntimeConfig, make_runtime
 
 logger = logging.getLogger(__name__)
 
+_Sender: TypeAlias = Callable[[ipc_module._IpcBase], Awaitable[None]]
 
-async def _worker_main(socket_path: Path, *, mock: bool) -> int:
-    """Connect to the supervisor and run the forwarder to completion.
 
-    Returns the exit code the subprocess should propagate.
-    """
-    logger.info("worker starting; socket=%s mock=%s", socket_path, mock)
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+async def _run_runtime_loop(
+    runtime: ForwarderRuntime,
+    *,
+    send: _Sender,
+    stop_event: asyncio.Event,
+    heartbeat_interval: float,
+) -> int:
+    try:
+        try:
+            runtime.connect()
+            await send(ipc_module.OlympeConnectedMsg())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("worker connect failed")
+            await send(ipc_module.OlympeErrorMsg(reason=str(exc)))
+            return 1
+
+        try:
+            runtime.start()
+            await send(ipc_module.PipelineStartedMsg())
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("worker start failed")
+            await send(ipc_module.PipelineErrorMsg(reason=str(exc)))
+            return 1
+
+        seq = 0
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_interval)
+                break
+            except TimeoutError:
+                pass
+
+            if not runtime.is_connected():
+                await send(ipc_module.OlympeDisconnectedMsg(reason="connection_lost"))
+                return 1
+
+            if not runtime.is_pipeline_running():
+                await send(ipc_module.PipelineErrorMsg(reason="pipeline_stopped"))
+                return 1
+
+            snapshot = runtime.telemetry_snapshot()
+            if snapshot:
+                timestamp = snapshot.get("timestamp")
+                await send(
+                    ipc_module.TelemetryMsg(
+                        t=timestamp if isinstance(timestamp, str) else _utc_now_iso(),
+                        payload=snapshot,
+                    )
+                )
+
+            seq += 1
+            await send(
+                ipc_module.HeartbeatMsg(
+                    seq=seq,
+                    healthy=True,
+                    metrics=runtime.heartbeat_metrics(snapshot),
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("worker runtime loop raised")
+        await send(ipc_module.PipelineErrorMsg(reason=str(exc)))
+        return 1
+    finally:
+        with suppress(Exception):
+            runtime.stop()
+        with suppress(Exception):
+            runtime.disconnect()
+    return 0
+
+
+async def _worker_main(
+    socket_path: Path,
+    *,
+    backend: str,
+    runtime_config: RuntimeConfig,
+    heartbeat_interval: float,
+) -> int:
+    logger.info(
+        "worker starting; socket=%s backend=%s drone_ip=%s",
+        socket_path,
+        backend,
+        runtime_config.drone_ip,
+    )
     try:
         reader, writer = await asyncio.open_unix_connection(str(socket_path))
     except (OSError, FileNotFoundError) as exc:
@@ -69,70 +145,80 @@ async def _worker_main(socket_path: Path, *, mock: bool) -> int:
     reader_task = asyncio.create_task(_read_commands(), name="pf-worker-reader")
 
     try:
-        await _send(ipc_module.OlympeConnectedMsg())
-        await _send(ipc_module.PipelineStartedMsg())
-
-        seq = 0
-        while not stop_event.is_set():
-            await asyncio.wait(
-                {reader_task, asyncio.create_task(asyncio.sleep(1.0))},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if stop_event.is_set():
-                break
-            seq += 1
-            await _send(ipc_module.HeartbeatMsg(seq=seq))
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("worker raised; sending pipeline.error")
-        try:
-            await _send(ipc_module.PipelineErrorMsg(reason=str(exc)))
-        except Exception:  # noqa: BLE001
-            pass
-        return 1
+        runtime = make_runtime(backend=backend, config=runtime_config)
+        return await _run_runtime_loop(
+            runtime,
+            send=_send,
+            stop_event=stop_event,
+            heartbeat_interval=heartbeat_interval,
+        )
     finally:
         reader_task.cancel()
-        with _suppress(Exception):
+        with suppress(Exception):
+            await reader_task
+        with suppress(Exception):
             writer.close()
             await writer.wait_closed()
-    return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Console-script entry point."""
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="parrot-forwarder-worker",
         description="ParrotForwarder v2 worker subprocess. Not meant to be invoked directly.",
     )
     parser.add_argument("--socket", required=True, type=Path, help="Path to supervisor UDS.")
     parser.add_argument(
+        "--backend",
+        choices=("real", "mock"),
+        default="real",
+        help="Worker runtime backend.",
+    )
+    parser.add_argument(
         "--mock",
         action="store_true",
-        help="Use the MockDrone backend instead of Olympe. Intended for tests and demos.",
+        help="Deprecated alias for --backend=mock.",
     )
+    parser.add_argument("--drone-ip", default="192.168.53.1")
+    parser.add_argument("--telemetry-fps", type=int, default=10)
+    parser.add_argument("--video-fps", type=int, default=30)
+    parser.add_argument("--srt-port", type=int, default=8890)
+    parser.add_argument("--klv-port", type=int, default=12345)
+    parser.add_argument("--video-stats-interval", type=int, default=30)
+    parser.add_argument("--connect-retry-interval", type=float, default=2.0)
+    parser.add_argument("--heartbeat-interval", type=float, default=1.0)
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
+    if args.mock:
+        args.backend = "mock"
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
     try:
-        return asyncio.run(_worker_main(args.socket, mock=args.mock))
+        return asyncio.run(
+            _worker_main(
+                args.socket,
+                backend=args.backend,
+                runtime_config=RuntimeConfig(
+                    drone_ip=args.drone_ip,
+                    telemetry_fps=args.telemetry_fps,
+                    video_fps=args.video_fps,
+                    srt_port=args.srt_port,
+                    klv_port=args.klv_port,
+                    video_stats_interval=args.video_stats_interval,
+                    connect_retry_interval=args.connect_retry_interval,
+                ),
+                heartbeat_interval=args.heartbeat_interval,
+            )
+        )
     except KeyboardInterrupt:
         return 0
-
-
-class _suppress:
-    """Lightweight contextlib.suppress to avoid importing contextlib for one use."""
-
-    def __init__(self, *exceptions: type[BaseException]):
-        self._exceptions = exceptions or (Exception,)
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, exc_type, exc, tb) -> bool:  # type: ignore[no-untyped-def]
-        return exc_type is not None and issubclass(exc_type, self._exceptions)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ help:
 	@echo "  make lint      - ruff check"
 	@echo "  make typecheck - mypy on src/parrot_forwarder"
 	@echo "  make fmt       - ruff check --fix (auto-fix style + imports)"
-	@echo "  make run       - launch parrot-forwarder with default config"
+	@echo "  make run       - launch parrot-forwarder-supervisor"
 	@echo "  make ci        - lint + typecheck + test (what GitHub Actions runs)"
 	@echo "  make clean     - remove build artifacts and caches"
 
@@ -35,7 +35,7 @@ fmt:
 	ruff check --fix .
 
 run:
-	parrot-forwarder
+	parrot-forwarder-supervisor
 
 ci: lint typecheck test
 

@@ -8,6 +8,13 @@ const state = {
 
 const el = (id) => document.getElementById(id);
 
+function clearTelemetry() {
+  el("battery").textContent = "-";
+  el("gps").textContent = "-";
+  el("rssi").textContent = "-";
+  el("fps").textContent = "-";
+}
+
 function setState(name) {
   const badge = el("state-badge");
   badge.textContent = name;
@@ -15,9 +22,12 @@ function setState(name) {
   if (name === "STREAMING" && !state.startedAt) {
     state.startedAt = Date.now();
   }
-  if (name === "DISCONNECTED") {
+  if (!["STREAMING", "DEGRADED"].includes(name)) {
     state.startedAt = null;
     el("uptime").textContent = "-";
+  }
+  if (["DISCONNECTED", "CONNECTING", "RESTARTING"].includes(name)) {
+    clearTelemetry();
   }
 }
 

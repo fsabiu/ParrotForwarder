@@ -1,5 +1,5 @@
 [Unit]
-Description=ParrotForwarder - Parrot Anafi Telemetry and Video Forwarder
+Description=ParrotForwarder v2 supervisor
 Documentation=https://github.com/fsabiu/ParrotForwarder
 After=network.target
 Requires=network.target
@@ -9,7 +9,7 @@ Type=simple
 User=oracle
 Group=oracle
 WorkingDirectory=/home/oracle/ParrotForwarder
-ExecStart=/home/oracle/anaconda3/envs/parrot/bin/python /home/oracle/ParrotForwarder/ParrotForwarder.py --drone-ip 192.168.53.1
+ExecStart=/home/oracle/ParrotForwarder/.venv/bin/parrot-forwarder-supervisor --config /etc/parrot-forwarder/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
@@ -20,11 +20,7 @@ SyslogIdentifier=parrot_forwarder
 # Environment variables
 Environment=PYTHONPATH=/home/oracle/ParrotForwarder
 Environment=PYTHONUNBUFFERED=1
-Environment=CONDA_DEFAULT_ENV=parrot
-Environment=CONDA_PREFIX=/home/oracle/anaconda3/envs/parrot
-Environment=CONDA_PYTHON_EXE=/home/oracle/anaconda3/bin/python
-Environment=CONDA_EXE=/home/oracle/anaconda3/bin/conda
-Environment=PATH=/home/oracle/anaconda3/envs/parrot/bin:/home/oracle/anaconda3/bin:/home/oracle/anaconda3/condabin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/home/oracle/ParrotForwarder/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Security settings (relaxed for conda environment access)
 NoNewPrivileges=true

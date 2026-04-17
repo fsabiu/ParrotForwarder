@@ -122,6 +122,7 @@ class Supervisor:
     worker_factory: WorkerFactory
     backoff_policy: BackoffPolicy = field(default_factory=BackoffPolicy)
     auto_start: bool = True
+    start_enabled: bool = True
     #: Injectable clock so tests don't wall-sleep.
     sleep: Callable[[float], Awaitable[None]] = field(default_factory=lambda: asyncio.sleep)
 
@@ -133,6 +134,7 @@ class Supervisor:
     _timeout_task: asyncio.Task[None] | None = field(init=False, default=None)
     _exit_watcher: asyncio.Task[None] | None = field(init=False, default=None)
     _pending_restart: asyncio.Task[None] | None = field(init=False, default=None)
+    restart_count: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         self.state_machine = make_state_machine(policy=self.backoff_policy)
@@ -204,6 +206,7 @@ class Supervisor:
             await self._kill_worker(grace_seconds=effect.grace_seconds)
             return
         if isinstance(effect, ScheduleRestart):
+            self.restart_count += 1
             await self._schedule_restart(delay=effect.delay_seconds, reason=effect.reason)
             return
         logger.warning("unknown side effect %s - ignoring", type(effect).__name__)

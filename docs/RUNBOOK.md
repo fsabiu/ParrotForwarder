@@ -17,7 +17,7 @@ git clone https://github.com/fsabiu/ParrotForwarder.git
 cd ParrotForwarder
 ./scripts/install.sh            # idempotent - safe to re-run
 source .venv/bin/activate
-parrot-forwarder --help
+parrot-forwarder-supervisor --help
 ```
 
 Environment overrides for the installer:
@@ -31,7 +31,7 @@ The v1 unit file at `parrot_forwarder.service` still works for v2; update the
 
 ```ini
 [Service]
-ExecStart=/home/pf/ParrotForwarder/.venv/bin/parrot-forwarder
+ExecStart=/home/pf/ParrotForwarder/.venv/bin/parrot-forwarder-supervisor --config /etc/parrot-forwarder/config.yaml
 ```
 
 Reload and start:
@@ -42,6 +42,26 @@ sudo journalctl -u parrot_forwarder -f
 ```
 
 Logs are rotating JSON at the path in `config.yaml` (`/var/log/parrot-forwarder/forwarder.log`). `journalctl` also captures stdout for the last service run.
+
+## Run in Docker
+
+This is the preferred path when you want the service reachable on the machine's
+own IP instead of a host-local tunnel or VM port-forward.
+
+```bash
+cd ParrotForwarder
+docker compose up -d --build
+docker compose ps
+```
+
+Compose uses:
+- `network_mode: host` so SRT and the dashboard bind directly on the Linux host.
+- `PARROT_FORWARDER_SUPERVISOR__HTTP__BIND=0.0.0.0` so the dashboard is reachable at `http://<machine-ip>:8080/`.
+- `/dev/bus/usb` passthrough for the Skycontroller 3.
+- `restart: unless-stopped` so the container survives reboots and crashes.
+
+If you want a host-managed config instead of the image default, uncomment the
+config bind mount in `docker-compose.yml`.
 
 ## Upgrade
 
@@ -70,25 +90,31 @@ sudo systemctl restart parrot_forwarder
 
 ## Dashboard
 
-Browse to `http://<host>:8080/` on the same LAN. The dashboard is localhost-only
-by default (`supervisor.http.bind: 127.0.0.1` in `config.yaml`). If you need
-remote access, SSH-tunnel the port rather than binding `0.0.0.0`:
+Bare metal / systemd default: the dashboard is localhost-only
+(`supervisor.http.bind: 127.0.0.1` in `config.yaml`), so use:
 
 ```bash
 ssh -L 8080:localhost:8080 pf@host
 ```
+
+Docker compose default: browse directly to `http://<machine-ip>:8080/` on the
+same trusted LAN/VPN because compose overrides the bind address to `0.0.0.0`.
 
 ## Quick diagnostic flow
 
 ```bash
 # 1. Is it running?
 systemctl status parrot_forwarder
+# or, if containerized:
+docker compose ps
 
 # 2. What does it think it is doing?
 curl -sf http://localhost:8080/status | jq
 
 # 3. What has happened recently?
 sudo journalctl -u parrot_forwarder -n 200 --no-pager
+# or, if containerized:
+docker compose logs --tail=200 parrot-forwarder
 
 # 4. Is the drone reachable?
 ping -c 3 192.168.53.1
@@ -105,6 +131,7 @@ sudo ss -lpn | grep 8890
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `state: DISCONNECTED`, many restarts | Skycontroller USB flapping | reseat cable; check `dmesg \| grep usb` |
+| `POST /control/start` returns 409 | worker backend disabled on this host | use Linux + Olympe + GStreamer, or run the Docker compose deployment on the target machine |
 | `state: DEGRADED`, signal=fps | video pipeline stalled | restart via `POST /control/reset`; if persists, `sudo journalctl -u parrot_forwarder \| grep pipeline.error` |
 | `state: STREAMING` but no video at client | network / firewall | `ufw allow 8890`; verify SRT locally: `ffplay srt://localhost:8890` |
 | Dashboard blank / 404 | wrong port | confirm `supervisor.http.port` in `config.yaml` and `ss -lpn \| grep 8080` |

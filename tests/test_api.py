@@ -120,6 +120,18 @@ async def test_control_stop_accepts(client: TestClient) -> None:
     assert response.status_code == 202
 
 
+async def test_control_start_rejects_when_worker_backend_disabled() -> None:
+    sup = Supervisor(
+        worker_factory=_workers_factory(record=[]),
+        auto_start=False,
+        start_enabled=False,
+        sleep=lambda _s: asyncio.sleep(0),
+    )
+    client = TestClient(create_app(sup))
+    response = client.post("/control/start")
+    assert response.status_code == 409
+
+
 async def test_control_reset_accepts_with_reason(client: TestClient) -> None:
     response = client.post("/control/reset", json={"reason": "manual test"})
     assert response.status_code == 202

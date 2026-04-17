@@ -1,141 +1,68 @@
 """
 CLI entry point for the v2 supervisor + dashboard.
 
-Registered as the ``parrot-forwarder-supervisor`` console script. It
-starts the asyncio :class:`Supervisor` with a worker factory you choose
-on the command line, then serves the REST + WebSocket + dashboard
-surface via uvicorn on the same event loop.
-
-For now the default ``--worker-backend=mock`` keeps everything
-in-process (MockDrone wrapped in a small stand-in worker) so the
-dashboard works out of the box without a drone. ``--worker-backend=none``
-starts the supervisor with ``auto_start=False`` so the dashboard shows
-``DISCONNECTED`` until the operator clicks **Start**.
-``--worker-backend=subprocess`` is reserved for the real Olympe worker
-once T17 lands.
+This is the operator-facing service entry point. It loads layered config,
+chooses an explicit worker backend, wires the supervisor to the worker IPC, and
+serves the REST/WebSocket/dashboard surface over uvicorn.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import logging
+import os
+import shutil
 import signal
+import sys
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import uvicorn
 
 from .. import ipc as ipc_module
 from ..backoff import BackoffPolicy
-from ..config import LoggingConfig
+from ..config import Config, ConfigError, LoggingConfig, load_config
 from ..logging_setup import configure_logging
-from . import Supervisor, WorkerHandle
+from ..state_machine import Heartbeat
+from . import Supervisor, WorkerHandle, ipc_to_event
 from .api import create_app
-from .api.stream import (
-    Broadcaster,
-    publish_state_transition,
-    register_stream_routes,
-)
-from .health import HealthMonitor, HealthThresholds
+from .api.stream import Broadcaster, publish_state_transition, register_stream_routes
+from .health import HealthMonitor, HealthThresholds, run_health_poll_loop
+from .ipc import WorkerProcessConfig, build_subprocess_worker_factory
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Fake in-process worker (for the mock backend)
-# ---------------------------------------------------------------------------
+_DEFAULT_CONFIG_PATH = Path("/etc/parrot-forwarder/config.yaml")
 
 
-@dataclass
-class _MockWorker:
-    """A small stand-in worker used when ``--worker-backend=mock``.
-
-    It immediately emits the happy-path events (``olympe.connected`` ->
-    ``pipeline.started``), then heartbeats every second until the
-    supervisor closes it. Purpose: make the dashboard light up green
-    without any drone or subprocess so Francesco can verify the plumbing
-    end-to-end.
-    """
-
-    supervisor: Supervisor
-    pid: int
-    exited: asyncio.Future[int]
-    _task: asyncio.Task[None] | None = None
-    _stopped: bool = False
-
-    def handle(self) -> WorkerHandle:
-        async def send(_m: ipc_module._IpcBase) -> None:
-            # Mock worker ignores commands; close() is how the supervisor
-            # stops it.
-            return None
-
-        async def close() -> None:
-            self._stopped = True
-            if self._task is not None and not self._task.done():
-                self._task.cancel()
-            if not self.exited.done():
-                self.exited.set_result(0)
-
-        return WorkerHandle(pid=self.pid, send=send, close=close, exited=self.exited)
-
-    async def start(self) -> None:
-        """Run the happy-path event sequence against the supervisor."""
-        # Tiny pause so the supervisor's CONNECTING state is visible on
-        # the dashboard instead of flashing through instantly.
-        await asyncio.sleep(0.2)
-        if self._stopped:
-            return
-        from ..state_machine import Heartbeat, OlympeConnected, PipelineStarted
-
-        await self.supervisor.post_event(OlympeConnected())
-        await asyncio.sleep(0.1)
-        if self._stopped:
-            return
-        await self.supervisor.post_event(PipelineStarted())
-        seq = 0
-        while not self._stopped:
-            await asyncio.sleep(1.0)
-            if self._stopped:
-                return
-            seq += 1
-            await self.supervisor.post_event(Heartbeat(seq=seq, healthy=True))
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-_pid_seq = 10_000
+def _can_run_real_worker() -> bool:
+    if sys.platform != "linux":
+        return False
+    if importlib.util.find_spec("olympe") is None:
+        return False
+    if shutil.which("gst-launch-1.0") is None:
+        return False
+    return True
 
 
-def _mock_worker_factory() -> Callable[[Supervisor], Awaitable[WorkerHandle]]:
-    """Build a factory that produces in-process mock workers."""
-
-    async def _factory(supervisor: Supervisor) -> WorkerHandle:
-        global _pid_seq
-        _pid_seq += 1
-        loop = asyncio.get_running_loop()
-        exited: asyncio.Future[int] = loop.create_future()
-        worker = _MockWorker(supervisor=supervisor, pid=_pid_seq, exited=exited)
-        worker._task = asyncio.create_task(worker.start(), name="pf-mock-worker")
-        return worker.handle()
-
-    return _factory
-
-
-# ---------------------------------------------------------------------------
-# Event bridge: supervisor state machine -> WebSocket broadcasters
-# ---------------------------------------------------------------------------
+def _resolve_backend(requested: str) -> str:
+    if requested != "auto":
+        return requested
+    return "subprocess" if _can_run_real_worker() else "none"
 
 
 def _install_event_bridge(
     supervisor: Supervisor,
     events: Broadcaster,
 ) -> None:
-    """Wrap the supervisor's dispatcher so every transition / restart
-    side effect is also published to the ``/stream/events`` broadcaster.
-    The full metrics bridge is T12 follow-up; this is enough to make
-    the dashboard show real transitions in the event log.
-    """
     original_dispatch = supervisor._dispatch
 
     async def _wrapped(event: Any) -> None:
@@ -154,100 +81,205 @@ def _install_event_bridge(
     supervisor._dispatch = _wrapped  # type: ignore[method-assign]
 
 
-def _utc_now_iso() -> str:
-    from datetime import datetime
-
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="parrot-forwarder-supervisor",
         description="ParrotForwarder v2 supervisor + dashboard.",
     )
     parser.add_argument(
-        "--bind",
-        default="127.0.0.1",
-        help="HTTP bind address (use 0.0.0.0 to expose to the LAN).",
+        "--config",
+        default=str(_DEFAULT_CONFIG_PATH),
+        help="Path to config.yaml. Missing default path falls back to in-code defaults.",
     )
-    parser.add_argument("--port", type=int, default=8080, help="HTTP port.")
+    parser.add_argument(
+        "--bind",
+        default=None,
+        help="Override supervisor.http.bind (use 0.0.0.0 to expose to the LAN).",
+    )
+    parser.add_argument("--port", type=int, default=None, help="Override supervisor.http.port.")
     parser.add_argument(
         "--worker-backend",
-        choices=("mock", "none"),
-        default="mock",
+        choices=("auto", "subprocess", "mock", "none"),
+        default="auto",
         help=(
-            "Which worker backend to use. 'mock' runs an in-process stand-in "
-            "that walks the happy path (useful without a drone); 'none' starts "
-            "the supervisor idle (dashboard shows DISCONNECTED until you "
-            "click Start)."
+            "'auto' runs the real worker on a supported Linux host and falls back "
+            "to 'none' elsewhere. 'mock' is a demo path only."
         ),
     )
     parser.add_argument(
         "--log-level",
-        default="INFO",
-        help="Root log level (DEBUG, INFO, WARNING, ERROR).",
+        default=None,
+        help="Override logging.level (DEBUG, INFO, WARNING, ERROR).",
     )
     parser.add_argument(
         "--log-file",
-        default="/tmp/parrot-forwarder.log",
-        help="Path to the rotating JSON log file.",
+        default=None,
+        help="Override logging.file.",
     )
     return parser.parse_args(argv)
 
 
+def _load_runtime_config(args: argparse.Namespace) -> Config:
+    config_path = Path(args.config) if args.config else _DEFAULT_CONFIG_PATH
+    if config_path == _DEFAULT_CONFIG_PATH and not config_path.exists():
+        yaml_path = None
+    else:
+        yaml_path = config_path
+
+    cli_overrides: dict[str, object] = {}
+    if args.bind is not None:
+        cli_overrides["supervisor.http.bind"] = args.bind
+    if args.port is not None:
+        cli_overrides["supervisor.http.port"] = args.port
+    if args.log_level is not None:
+        cli_overrides["logging.level"] = args.log_level.upper()
+    if args.log_file is not None:
+        cli_overrides["logging.file"] = args.log_file
+
+    return load_config(
+        path=yaml_path,
+        env=os.environ,
+        cli_overrides=cli_overrides,
+    )
+
+
+def _build_message_handler(
+    supervisor: Supervisor,
+    *,
+    telemetry: Broadcaster,
+    health: HealthMonitor,
+) -> Callable[[ipc_module._IpcBase], Awaitable[None]]:
+    async def _handle(message: ipc_module._IpcBase) -> None:
+        if isinstance(message, ipc_module.TelemetryMsg):
+            await telemetry.publish({"t": message.t, "payload": message.payload})
+            return
+
+        event = ipc_to_event(message)
+        if event is None:
+            return
+
+        if isinstance(message, ipc_module.HeartbeatMsg):
+            assert isinstance(event, Heartbeat)
+            for health_event in health.record_heartbeat(event, metrics=message.metrics):
+                await supervisor.post_event(health_event)
+
+        await supervisor.post_event(event)
+
+    return _handle
+
+
+def _none_worker_factory() -> Callable[[Supervisor], Awaitable[WorkerHandle]]:
+    async def _factory(_supervisor: Supervisor) -> WorkerHandle:  # pragma: no cover
+        raise RuntimeError("start disabled; set --worker-backend=subprocess on a Linux host")
+
+    return _factory
+
+
 async def _amain(args: argparse.Namespace) -> int:
+    try:
+        cfg = _load_runtime_config(args)
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 2
+
     configure_logging(
-        LoggingConfig(level=args.log_level.upper(), format="json", file=args.log_file),
+        LoggingConfig(
+            level=cfg.logging.level,
+            format=cfg.logging.format,
+            file=cfg.logging.file,
+            rotation=cfg.logging.rotation,
+        ),
         also_stream=True,
     )
-    logger.info("supervisor booting on %s:%s backend=%s", args.bind, args.port, args.worker_backend)
 
-    # Build broadcasters before the supervisor so the bridge can reach them.
+    backend = _resolve_backend(args.worker_backend)
+    if args.worker_backend == "auto" and backend == "none":
+        logger.warning(
+            "real worker unavailable on this host; starting idle dashboard (state stays DISCONNECTED)"
+        )
+
     events = Broadcaster()
     telemetry = Broadcaster()
-
-    if args.worker_backend == "mock":
-        worker_factory = _mock_worker_factory()
-        auto_start = True
-    else:
-        # 'none' - no auto-start; waits for POST /control/start.
-        async def _noop_factory(_sup: Supervisor) -> WorkerHandle:  # pragma: no cover
-            raise RuntimeError("start disabled; set --worker-backend=mock to run the demo")
-
-        worker_factory = _noop_factory
-        auto_start = False
-
-    supervisor = Supervisor(
-        worker_factory=worker_factory,
-        backoff_policy=BackoffPolicy(base_seconds=1.0, max_seconds=30.0, jitter_seconds=0.5),
-        auto_start=auto_start,
+    health = HealthMonitor(
+        thresholds=HealthThresholds(
+            heartbeat_timeout_seconds=cfg.supervisor.heartbeat.timeout_seconds,
+        )
     )
-    _install_event_bridge(supervisor, events)
 
-    health = HealthMonitor(thresholds=HealthThresholds())
-    _ = health  # wiring the health poll loop into the supervisor is T12 follow-up.
+    if backend in {"subprocess", "mock"}:
+        supervisor = Supervisor(
+            worker_factory=_none_worker_factory(),
+            backoff_policy=BackoffPolicy(
+                base_seconds=cfg.supervisor.backoff.base_seconds,
+                max_seconds=cfg.supervisor.backoff.max_seconds,
+                jitter_seconds=cfg.supervisor.backoff.jitter_seconds,
+            ),
+            auto_start=cfg.supervisor.auto_start,
+            start_enabled=True,
+        )
+        on_message = _build_message_handler(
+            supervisor,
+            telemetry=telemetry,
+            health=health,
+        )
+        process_config = WorkerProcessConfig(
+            backend="real" if backend == "subprocess" else "mock",
+            drone_ip=cfg.drone.ip,
+            telemetry_fps=cfg.forwarder.telemetry_fps,
+            video_fps=cfg.forwarder.video_fps,
+            srt_port=cfg.forwarder.srt_port,
+            klv_port=cfg.forwarder.klv_port,
+            heartbeat_interval=cfg.supervisor.heartbeat.interval_seconds,
+            video_stats_interval=30,
+            connect_retry_interval=max(1.0, cfg.supervisor.heartbeat.interval_seconds),
+            log_level=cfg.logging.level,
+        )
+        subprocess_factory = build_subprocess_worker_factory(
+            process_config,
+            on_message=on_message,
+        )
+
+        async def _worker_factory(sup: Supervisor) -> WorkerHandle:
+            health.reset()
+            return await subprocess_factory(sup)
+
+        supervisor.worker_factory = _worker_factory
+    else:
+        supervisor = Supervisor(
+            worker_factory=_none_worker_factory(),
+            backoff_policy=BackoffPolicy(
+                base_seconds=cfg.supervisor.backoff.base_seconds,
+                max_seconds=cfg.supervisor.backoff.max_seconds,
+                jitter_seconds=cfg.supervisor.backoff.jitter_seconds,
+            ),
+            auto_start=False,
+            start_enabled=False,
+        )
+
+    _install_event_bridge(supervisor, events)
 
     app = create_app(supervisor)
     register_stream_routes(app, events=events, telemetry=telemetry)
 
     config = uvicorn.Config(
         app,
-        host=args.bind,
-        port=args.port,
-        log_level=args.log_level.lower(),
+        host=cfg.supervisor.http.bind,
+        port=cfg.supervisor.http.port,
+        log_level=cfg.logging.level.lower(),
         access_log=False,
         lifespan="off",
     )
     server = uvicorn.Server(config)
 
-    # Run supervisor + uvicorn on the same event loop; shutdown when either
-    # exits.
     supervisor_task = asyncio.create_task(supervisor.run(), name="pf-supervisor")
+    health_task = asyncio.create_task(
+        run_health_poll_loop(
+            health,
+            supervisor.post_event,
+            interval_seconds=cfg.supervisor.heartbeat.interval_seconds,
+        ),
+        name="pf-health",
+    )
 
     def _trigger_shutdown() -> None:
         supervisor.stop()
@@ -260,14 +292,28 @@ async def _amain(args: argparse.Namespace) -> int:
         except (NotImplementedError, ValueError):
             pass
 
+    logger.info(
+        "supervisor booting on %s:%s worker_backend=%s",
+        cfg.supervisor.http.bind,
+        cfg.supervisor.http.port,
+        backend,
+    )
+
     try:
         await server.serve()
     finally:
         supervisor.stop()
+        for task in (health_task, supervisor_task):
+            if task is health_task and not task.done():
+                task.cancel()
         try:
             await asyncio.wait_for(supervisor_task, timeout=3.0)
         except TimeoutError:
             supervisor_task.cancel()
+        try:
+            await health_task
+        except asyncio.CancelledError:
+            pass
 
     return 0
 

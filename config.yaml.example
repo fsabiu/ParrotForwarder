@@ -19,7 +19,7 @@ forwarder:
 
 supervisor:
   http:
-    bind: "127.0.0.1"              # NEVER expose externally in v2 (no auth)
+    bind: "127.0.0.1"              # default; use 0.0.0.0 only on a trusted LAN/VPN or in Docker
     port: 8080                     # dashboard + REST + WS on this port
   auto_start: true                 # start forwarding on supervisor boot
   backoff:

@@ -40,6 +40,11 @@ ParrotForwarder is a professional-grade UAS streaming system that synchronizes v
 - **GStreamer-based muxing** for professional-grade stream composition
 - **Modular architecture** with cleanly separated components and thread-safe operation
 
+For v2 operations, run `parrot-forwarder-supervisor` on the host or
+`docker compose up -d --build` on the target machine. The containerized path
+uses host networking and can expose the dashboard on `http://<machine-ip>:8080/`
+while the default bare-metal config keeps it on `http://localhost:8080/`.
+
 ### Use Cases
 
 - UAS operations requiring synchronized video and telemetry
@@ -1116,4 +1121,3 @@ For questions, issues, or contributions, please open an issue on GitHub.
 - GPS fallback with default coordinates (36.715°N, -4.288°W)
 - Configurable health monitoring and reconnection behavior
 - Enhanced MISB 0601 KLV encoding with additional tags
-
