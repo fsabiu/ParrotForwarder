@@ -433,91 +433,45 @@ This layered approach ensures that errors at any level are handled appropriately
 
 ## Installation
 
-### 1. System Dependencies
+One command on a fresh **Ubuntu 24.04 ARM64** host brings the repo from empty to a running dev environment:
 
 ```bash
-# Update system
-sudo apt-get update
-sudo apt-get upgrade
-
-# Install Python and basic dependencies
-sudo apt-get install -y \
-    python3.11 \
-    python3.11-venv \
-    python3-pip \
-    libsdl2-dev \
-    libsdl2-2.0-0 \
-    libjpeg-dev \
-    libopencv-dev
-
-# Install GStreamer
-sudo apt-get install -y \
-    gstreamer1.0-tools \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav \
-    gstreamer1.0-rtsp
-
-# Verify GStreamer installation
-gst-inspect-1.0 mpegtsmux  # Should show mpegtsmux element
-gst-inspect-1.0 srtsink    # Should show srtsink element
-```
-
-**Important**: Make sure you're using the system GStreamer (`/usr/bin/gst-launch-1.0`), not an Anaconda/Conda version which may be outdated.
-
-### 2. Clone Repository
-
-```bash
-git clone <repository-url> drone
-cd drone
-```
-
-### 3. Create Virtual Environment
-
-```bash
-# Create virtual environment with Python 3.11
-python3.11 -m venv drone_env
-
-# Activate environment
-source drone_env/bin/activate
-```
-
-### 4. Install the Package
-
-The project is laid out under `src/parrot_forwarder/` and builds with `pyproject.toml`. Install it in editable mode:
-
-```bash
-# Editable install: source changes are picked up without reinstalling
-pip install -e .
-
-# Or, if you prefer the pinned transitive set used on the deployment host:
-pip install -r requirements.txt && pip install -e . --no-deps
-
-# For development (adds pytest, ruff, mypy, httpx, pydantic):
-pip install -e ".[dev]"
-# equivalent to:
-pip install -e . -r requirements-dev.txt
-```
-
-After install, the `parrot-forwarder` console script is on `PATH`:
-
-```bash
+git clone https://github.com/fsabiu/ParrotForwarder.git
+cd ParrotForwarder
+./scripts/install.sh
+source .venv/bin/activate
 parrot-forwarder --help
-# or, via the v1 shim that still works:
-python ParrotForwarder.py --help
 ```
 
-**Important**: `protobuf==3.20.3` is pinned in `pyproject.toml` and must stay below 4.x. Olympe's transitive 3.7.1 is ABI-incompatible with Python 3.11+, and 4.x breaks Olympe's generated messages.
+What `scripts/install.sh` does, idempotently:
 
-### 5. Verify Installation
+1. Verifies the host is Ubuntu 24.04 (warns if not; does not abort).
+2. `apt-get install`s the GStreamer stack (`gstreamer1.0-{tools,plugins-*,libav,rtsp}`) plus SDL2 / OpenCV / build toolchain dependencies Olympe needs.
+3. Installs [pyenv](https://github.com/pyenv/pyenv) (pinned tag) if missing.
+4. Builds Python 3.11.11 via pyenv (one-time, ~3 min).
+5. Creates a project-local `.venv` against that interpreter.
+6. `pip install -e .` + `-r requirements-dev.txt`.
+7. Force-reinstalls `protobuf==3.20.3` over Olympe's 3.7.1 transitive (the reason Python 3.11 works at all).
+8. Verifies `mpegtsmux` and `srtsink` GStreamer elements are present.
+9. Seeds `/etc/parrot-forwarder/config.yaml` from `config.yaml.example` if missing.
+
+Skip flags: `PF_SKIP_APT=1` (container / pre-provisioned host), `PF_SKIP_PYENV=1` (you already have `python3.11` on `PATH`).
+
+Day-to-day workflow is driven by the top-level `Makefile`:
 
 ```bash
-# Run the unit test skeleton (no drone required):
-pytest tests/
+make test       # pytest, excluding live + slow
+make lint       # ruff check
+make typecheck  # mypy on src/parrot_forwarder
+make ci         # lint + typecheck + test (what GitHub Actions runs)
+make run        # parrot-forwarder with the system config
+```
 
-# Drone-dependent diagnostic scripts (live drone required):
+**Note**: `parrot-olympe` is Linux-only. On macOS or Windows you can run the v2 tests (`make test`), linting, and type-checking - the runtime itself will not start without Olympe.
+
+### Live drone diagnostic scripts (v1)
+
+```bash
 python tests/test_drone_connection.py
 python tests/test_video_stream.py
 python tests/test_klv_receiver.py --port 12345
