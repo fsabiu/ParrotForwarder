@@ -54,8 +54,10 @@ function setField(id, value = "-") {
 function syncPreviewState() {
   const frame = el("preview-frame");
   if (!frame) return;
-  const visible = state.previewAvailable && ["STREAMING", "DEGRADED"].includes(state.serviceState);
-  frame.classList.toggle("has-video", visible);
+  // MJPEG is independent of the SRT pipeline - it pulls RTSP directly.
+  // Show the video as soon as the first JPEG frame loads, regardless of
+  // service state.
+  frame.classList.toggle("has-video", state.previewAvailable);
 }
 
 function clearTelemetry() {
@@ -256,12 +258,21 @@ function setPreviewAvailable(value) {
 function wirePreviewState() {
   const preview = el("preview");
   if (!preview) return;
-  for (const eventName of ["loadeddata", "canplay", "playing"]) {
-    preview.addEventListener(eventName, () => setPreviewAvailable(true));
-  }
-  for (const eventName of ["emptied", "abort", "error"]) {
-    preview.addEventListener(eventName, () => setPreviewAvailable(false));
-  }
+
+  const previewUrl = () => `/preview/stream.mjpg?ts=${Date.now()}`;
+  const RETRY_DELAY_MS = 1500;
+  let retryTimer = null;
+
+  const reload = () => {
+    clearTimeout(retryTimer);
+    preview.src = previewUrl();
+  };
+
+  preview.addEventListener("error", () => {
+    retryTimer = setTimeout(reload, RETRY_DELAY_MS);
+  });
+
+  reload();
 }
 
 function connectEventStream() {
@@ -294,7 +305,9 @@ function renderTelemetry(payload, sampleTime) {
   setField("satellites", fmtInteger(position.satellites));
   setField("rssi", isNumber(payload.rssi_dbm) ? `${payload.rssi_dbm} dBm` : "-");
   setField("fps", isNumber(payload.fps) ? payload.fps.toFixed(1) : "-");
-  if (sampleTime) setField("last-telemetry", sampleTime);
+  // "last-telemetry" is driven by tickTimers() as a relative "Ns ago" value;
+  // don't overwrite with the raw ISO timestamp here (caused a 1 Hz flicker
+  // between the timestamp and "0s ago").
 
   setField("position-source", position.source || "-");
   setField("position-message", position.message || "-");

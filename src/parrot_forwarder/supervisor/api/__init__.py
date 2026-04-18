@@ -9,13 +9,15 @@ every request/response for log correlation.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -25,7 +27,10 @@ from ...dashboard import static_dir as dashboard_static_dir
 from ...state_machine import UserReset, UserStart, UserStop
 
 if TYPE_CHECKING:
+    from ...config import Config
     from .. import Supervisor
+
+logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -64,11 +69,13 @@ class Problem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def create_app(supervisor: Supervisor) -> FastAPI:
+def create_app(supervisor: Supervisor, config: "Config | None" = None) -> FastAPI:
     """Build the FastAPI app wired to ``supervisor``.
 
     The supervisor is passed in explicitly rather than pulled from a
-    global so tests can construct many instances side-by-side.
+    global so tests can construct many instances side-by-side. ``config``
+    is optional for unit tests; when omitted the live MJPEG preview is
+    disabled and ``/preview/stream.mjpg`` returns 503.
     """
     app = FastAPI(
         title="ParrotForwarder Supervisor",
@@ -94,7 +101,7 @@ def create_app(supervisor: Supervisor) -> FastAPI:
 
     _register_routes(app, supervisor)
     _register_dashboard(app)
-    _register_preview_stub(app)
+    _register_preview(app, config)
     return app
 
 
@@ -219,9 +226,9 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
 # ---------------------------------------------------------------------------
 
 
-def make_asgi_app(supervisor: Supervisor) -> ASGIApp:
+def make_asgi_app(supervisor: Supervisor, config: "Config | None" = None) -> ASGIApp:
     """Return the ASGI callable for uvicorn."""
-    return create_app(supervisor)
+    return create_app(supervisor, config)
 
 
 # ---------------------------------------------------------------------------
@@ -265,27 +272,101 @@ def _register_dashboard(app: FastAPI) -> None:
         )
 
 
-def _register_preview_stub(app: FastAPI) -> None:
-    """Stub the HLS preview endpoints.
+_MJPEG_BOUNDARY = "pf-frame"
 
-    The real pipeline (GStreamer ``hlssink2`` writing to a shared directory)
-    will replace these when the worker's GStreamer branch lands on a host
-    with a drone. Until then we return an empty but valid HLS playlist so
-    the dashboard's ``<video>`` element doesn't log noisy fetch errors.
+
+def _build_mjpeg_pipeline(rtsp_url: str) -> list[str]:
+    """Shell loop that respawns gst-launch if it dies (e.g. RTSP drop/EOS).
+
+    Software H.264 decode (avdec_h264): VM has no GPU and GStreamer Vulkan
+    auto-discovery is broken on the host. Frames are scaled to 640x360 and
+    JPEG-encoded at quality 65 for modest CPU/bandwidth with sub-second lag.
+
+    The shell wrapper is critical: rtspsrc on ANAFI sometimes emits EOS
+    when the drone's video source momentarily pauses (e.g. gimbal recalibrates
+    or camera settings change). Without a respawn the MJPEG browser stream
+    would freeze until a manual reload. With ``while true`` the pipeline
+    restarts and the client sees fresh multipart parts within ~1 s. Same
+    boundary string across restarts keeps browsers happy.
     """
-
-    placeholder_playlist = (
-        "#EXTM3U\n"
-        "#EXT-X-VERSION:3\n"
-        "#EXT-X-TARGETDURATION:2\n"
-        "#EXT-X-MEDIA-SEQUENCE:0\n"
-        "#EXT-X-PLAYLIST-TYPE:VOD\n"
-        "#EXT-X-ENDLIST\n"
+    gst_cmd = (
+        "/usr/bin/gst-launch-1.0 -q "
+        f"rtspsrc location='{rtsp_url}' protocols=udp latency=50 "
+        "timeout=5000000 retry=3 ! "
+        "rtph264depay ! h264parse ! avdec_h264 ! "
+        "videoconvert ! videoscale ! video/x-raw,width=640,height=360 ! "
+        "jpegenc quality=65 ! "
+        f"multipartmux boundary={_MJPEG_BOUNDARY} ! "
+        "fdsink fd=1"
     )
+    wrapper = (
+        "trap 'kill -TERM $GPID 2>/dev/null; exit 0' TERM INT; "
+        "while true; do "
+        f"  {gst_cmd} & GPID=$!; "
+        "  wait $GPID; "
+        "  echo 'mjpeg gst exited, respawning' 1>&2; "
+        "  sleep 1; "
+        "done"
+    )
+    return ["/bin/bash", "-c", wrapper]
 
-    @app.get("/preview/stream.m3u8", include_in_schema=False)
-    async def _preview_playlist() -> Response:
-        return Response(
-            content=placeholder_playlist,
-            media_type="application/vnd.apple.mpegurl",
+
+def _register_preview(app: FastAPI, config: "Config | None") -> None:
+    """Live MJPEG preview pulled from the drone RTSP stream.
+
+    Replaces the previous HLS stub. One subprocess per HTTP client; killed
+    on disconnect. Trade-off: if N dashboard tabs open, N concurrent
+    RTSP sessions hit the drone (Anafi tolerates a handful).
+    """
+    drone_ip = config.drone.ip if config is not None else None
+
+    @app.get("/preview/stream.mjpg", include_in_schema=False)
+    async def _preview_mjpeg(request: Request) -> StreamingResponse:
+        if drone_ip is None:
+            raise HTTPException(status_code=503, detail="preview disabled (no config)")
+
+        rtsp_url = f"rtsp://{drone_ip}/live"
+        cmd = _build_mjpeg_pipeline(rtsp_url)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=503, detail=f"gst-launch missing: {exc}")
+
+        async def stream_body():
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    chunk = await proc.stdout.read(16384)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=2)
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                    except Exception:
+                        pass
+
+        return StreamingResponse(
+            stream_body(),
+            media_type=f"multipart/x-mixed-replace; boundary={_MJPEG_BOUNDARY}",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
+
+    # Backwards-compat: dashboard cached browsers may still poll the old
+    # m3u8 path. Return 410 so they stop trying.
+    @app.get("/preview/stream.m3u8", include_in_schema=False)
+    async def _preview_playlist_gone() -> Response:
+        return Response(status_code=410, content="HLS replaced by /preview/stream.mjpg\n")

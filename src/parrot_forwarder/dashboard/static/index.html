@@ -85,13 +85,9 @@
     <section class="panel preview">
       <h2>Video Preview</h2>
       <div id="preview-frame" class="preview-frame">
-        <video id="preview" controls muted autoplay playsinline>
-          <source src="/preview/stream.m3u8" type="application/vnd.apple.mpegurl" />
-          Your browser does not support HLS playback; install hls.js or use Safari.
-        </video>
-        <div id="preview-overlay" class="preview-overlay">Waiting for live video</div>
+        <img id="preview" alt="live drone video" />
       </div>
-      <p class="hint">Blank preview means the HLS branch is not producing live segments yet.</p>
+      <p class="hint">MJPEG live preview from the drone (downscaled, ~250 ms latency). Main full-rate stream: <code>srt://&lt;host&gt;:8890</code>.</p>
     </section>
 
     <section class="panel controls">

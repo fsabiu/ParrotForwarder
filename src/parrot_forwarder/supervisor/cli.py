@@ -260,7 +260,7 @@ async def _amain(args: argparse.Namespace) -> int:
 
     _install_event_bridge(supervisor, events)
 
-    app = create_app(supervisor)
+    app = create_app(supervisor, config=cfg)
     register_stream_routes(app, events=events, telemetry=telemetry)
 
     config = uvicorn.Config(

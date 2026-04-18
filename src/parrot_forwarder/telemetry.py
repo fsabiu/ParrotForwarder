@@ -59,6 +59,7 @@ from olympe.messages.common.SettingsState import (
     ProductVersionChanged,
 )
 from olympe.messages.gimbal import attitude as GimbalAttitude, offsets as GimbalOffsets
+from olympe.messages.wifi import rssi_changed as WifiRssiChanged
 
 from .klv_encoder import encode_telemetry_to_klv
 
@@ -197,6 +198,55 @@ class TelemetryForwarder(threading.Thread):
         self.max_loop_times = 100  # Keep last 100 loop times for stats
         self.packets_sent = 0
         self.send_errors = 0
+
+        # Sticky last-known event state. Olympe does not always cache push
+        # events behind get_state (e.g. gimbal.attitude is event-only on
+        # Anafi when landed; wifi.rssi_changed is the actual RSSI source,
+        # not common.CommonState.WifiSignalChanged). We subscribe to the
+        # events we care about and remember the last payload + timestamp,
+        # so the snapshot keeps the last value even when the drone goes
+        # quiet or the worker has no current cached state.
+        self._sticky: dict[str, tuple[str, dict[str, Any]]] = {}
+        self._sub_handles: list = []
+        self._sticky_subscriptions = (
+            ("gimbal_attitude", GimbalAttitude),
+            ("gimbal_offsets", GimbalOffsets),
+            ("wifi_rssi", WifiRssiChanged),
+            ("camera_recording_state", recording_state),
+            ("camera_alignment_offsets", alignment_offsets),
+            ("storage_remaining", MassStorageInfoRemainingListChanged),
+        )
+        self._register_event_subscribers()
+
+    def _register_event_subscribers(self) -> None:
+        if self.drone is None:
+            return
+        for key, message in self._sticky_subscriptions:
+            try:
+                expectation = message()
+                handle = self.drone.subscribe(self._make_event_handler(key), expectation)
+            except Exception as exc:
+                self.logger.warning("subscribe(%s) failed: %s", key, exc)
+                continue
+            self._sub_handles.append(handle)
+            self.logger.info("subscribed sticky event: %s", key)
+
+    def _make_event_handler(self, key: str):
+        def _handler(event, scheduler):
+            try:
+                payload = dict(event.args) if getattr(event, "args", None) else {}
+            except Exception:
+                payload = {}
+            self._sticky[key] = (_utc_now_iso(), payload)
+        return _handler
+
+    def _sticky_get(self, key: str) -> dict[str, Any] | None:
+        entry = self._sticky.get(key)
+        return entry[1] if entry else None
+
+    def _sticky_ts(self, key: str) -> str | None:
+        entry = self._sticky.get(key)
+        return entry[0] if entry else None
 
     def _safe_get_state(self, message: Any) -> dict[str, Any] | None:
         try:
@@ -416,9 +466,16 @@ class TelemetryForwarder(threading.Thread):
         if air_speed:
             telemetry["airspeed_mps"] = _number(air_speed.get("airSpeed"))
 
-        wifi = self._safe_get_state(WifiSignalChanged)
-        if wifi:
-            telemetry["rssi_dbm"] = _number(wifi.get("rssi"))
+        # RSSI: drone pushes wifi.rssi_changed (sticky listener captures it).
+        # WifiSignalChanged is kept as a fallback for legacy firmware.
+        wifi_rssi_event = self._sticky_get("wifi_rssi")
+        if wifi_rssi_event and wifi_rssi_event.get("rssi") is not None:
+            telemetry["rssi_dbm"] = _number(wifi_rssi_event.get("rssi"))
+            telemetry["rssi_updated_at"] = self._sticky_ts("wifi_rssi")
+        else:
+            wifi = self._safe_get_state(WifiSignalChanged)
+            if wifi:
+                telemetry["rssi_dbm"] = _number(wifi.get("rssi"))
 
         link_quality = self._safe_get_state(LinkSignalQuality)
         if link_quality:
@@ -458,7 +515,11 @@ class TelemetryForwarder(threading.Thread):
                 hovering_warning.get("no_gps_too_high", False)
             )
 
-        gatt = self._safe_get_state(GimbalAttitude)
+        # Gimbal attitude is event-only on Anafi: the drone emits gimbal.attitude
+        # only when the gimbal moves, never as a periodic status. Prefer the
+        # sticky last-known payload, fall back to get_state for the rare case
+        # where Olympe also caches it.
+        gatt = self._sticky_get("gimbal_attitude") or self._safe_get_state(GimbalAttitude)
         if gatt:
             gimbal_id = gatt.get("gimbal_id")
             if isinstance(gimbal_id, int):
@@ -478,8 +539,11 @@ class TelemetryForwarder(threading.Thread):
             telemetry["gimbal_yaw_rel"] = _number(gatt.get("yaw_relative"))
             telemetry["gimbal_pitch_rel"] = _number(gatt.get("pitch_relative"))
             telemetry["gimbal_roll_rel"] = _number(gatt.get("roll_relative"))
+            ts = self._sticky_ts("gimbal_attitude")
+            if ts:
+                telemetry["gimbal_attitude_updated_at"] = ts
 
-        goff = self._safe_get_state(GimbalOffsets)
+        goff = self._sticky_get("gimbal_offsets") or self._safe_get_state(GimbalOffsets)
         if goff:
             telemetry["gimbal_offset_update_state"] = _enum_text(goff.get("update_state"))
             telemetry["gimbal_offset_min_yaw"] = _number(goff.get("min_bound_yaw"))
@@ -492,7 +556,7 @@ class TelemetryForwarder(threading.Thread):
             telemetry["gimbal_offset_max_roll"] = _number(goff.get("max_bound_roll"))
             telemetry["gimbal_offset_roll"] = _number(goff.get("current_roll"))
 
-        cam_align = self._safe_get_state(alignment_offsets)
+        cam_align = self._sticky_get("camera_alignment_offsets") or self._safe_get_state(alignment_offsets)
         if cam_align:
             cam_align_id = cam_align.get("cam_id")
             if isinstance(cam_align_id, int):
@@ -508,7 +572,7 @@ class TelemetryForwarder(threading.Thread):
             telemetry["cam_align_max_roll"] = _number(cam_align.get("max_bound_roll"))
             telemetry["cam_align_roll"] = _number(cam_align.get("current_roll"))
 
-        recording = self._safe_get_state(recording_state)
+        recording = self._sticky_get("camera_recording_state") or self._safe_get_state(recording_state)
         if recording:
             recording_cam_id = recording.get("cam_id")
             if isinstance(recording_cam_id, int):
@@ -524,7 +588,7 @@ class TelemetryForwarder(threading.Thread):
                     tz=UTC,
                 ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
-        storage = self._safe_get_state(MassStorageInfoRemainingListChanged)
+        storage = self._sticky_get("storage_remaining") or self._safe_get_state(MassStorageInfoRemainingListChanged)
         if storage:
             telemetry["storage_free_space_mb"] = _number(storage.get("free_space"))
             telemetry["storage_recording_time_remaining_min"] = _number(storage.get("rec_time"))
@@ -737,6 +801,12 @@ class TelemetryForwarder(threading.Thread):
     def stop(self):
         """Stop the telemetry forwarder and cleanup resources."""
         self.running = False
+        for handle in self._sub_handles:
+            try:
+                self.drone.unsubscribe(handle)
+            except Exception:
+                pass
+        self._sub_handles.clear()
         if self.udp_socket:
             try:
                 self.udp_socket.close()

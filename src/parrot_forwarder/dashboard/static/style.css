@@ -114,7 +114,8 @@ dd {
     linear-gradient(180deg, #050709 0%, #090d12 100%);
 }
 
-.preview-frame video {
+.preview-frame video,
+.preview-frame img {
   display: block;
   width: 100%;
   height: 100%;
