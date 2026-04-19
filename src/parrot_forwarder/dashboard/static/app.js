@@ -6,14 +6,18 @@ const state = {
   lastTelemetryAt: null,
   serviceState: "DISCONNECTED",
   previewAvailable: false,
+  telemetryStale: true,
 };
 
 const DASHBOARD_THEME_KEY = "parrotForwarder.theme";
 const DASHBOARD_THEMES = new Set(["dark", "light", "sun"]);
 const STREAM_RECONNECT_DELAY_MS = 1000;
 const STATUS_REFRESH_INTERVAL_MS = 1000;
+const TELEMETRY_STALE_AFTER_MS = 3000;
+const DESKTOP_LAYOUT_MEDIA_QUERY = "(min-width: 1101px)";
 
 let previewController = null;
+let telemetryLayoutObserver = null;
 
 const TELEMETRY_FIELDS = [
   "battery",
@@ -100,6 +104,48 @@ function setField(id, value = "-") {
   if (node) node.textContent = value;
 }
 
+function syncTelemetryJsonHeight() {
+  const rawPanel = document.querySelector(".raw");
+  const previewPanel = document.querySelector(".preview");
+  const pre = el("telemetry-json");
+  const title = rawPanel?.querySelector("h2");
+  if (!rawPanel || !previewPanel || !pre) return;
+
+  rawPanel.style.removeProperty("height");
+  pre.style.removeProperty("height");
+  pre.style.removeProperty("max-height");
+
+  if (!window.matchMedia(DESKTOP_LAYOUT_MEDIA_QUERY).matches) {
+    return;
+  }
+
+  const panelStyles = window.getComputedStyle(rawPanel);
+  const titleStyles = title ? window.getComputedStyle(title) : null;
+  const verticalPadding =
+    parseFloat(panelStyles.paddingTop || "0") + parseFloat(panelStyles.paddingBottom || "0");
+  const titleHeight = title ? title.getBoundingClientRect().height : 0;
+  const titleMarginBottom = titleStyles ? parseFloat(titleStyles.marginBottom || "0") : 0;
+  const targetPanelHeight = previewPanel.getBoundingClientRect().height;
+  const targetPreHeight = Math.max(
+    240,
+    Math.floor(targetPanelHeight - verticalPadding - titleHeight - titleMarginBottom)
+  );
+
+  rawPanel.style.height = `${Math.floor(targetPanelHeight)}px`;
+  pre.style.height = `${targetPreHeight}px`;
+  pre.style.maxHeight = `${targetPreHeight}px`;
+}
+
+function wireTelemetryJsonHeight() {
+  const previewPanel = document.querySelector(".preview");
+  if (!previewPanel) return;
+  syncTelemetryJsonHeight();
+  telemetryLayoutObserver?.disconnect();
+  telemetryLayoutObserver = new ResizeObserver(() => syncTelemetryJsonHeight());
+  telemetryLayoutObserver.observe(previewPanel);
+  window.addEventListener("resize", syncTelemetryJsonHeight);
+}
+
 function syncPreviewState() {
   const frame = el("preview-frame");
   const status = el("preview-status");
@@ -137,6 +183,16 @@ function clearTelemetry() {
   }
   setField("telemetry-json", "{}");
   state.lastTelemetryAt = null;
+  syncTelemetryJsonHeight();
+}
+
+function markTelemetryStale() {
+  if (state.telemetryStale) return;
+  state.telemetryStale = true;
+  clearTelemetry();
+  previewController?.stop();
+  state.previewAvailable = false;
+  syncPreviewState();
 }
 
 function setState(name) {
@@ -154,6 +210,7 @@ function setState(name) {
     setField("uptime", "-");
   }
   if (!["STREAMING", "DEGRADED", "READY"].includes(name)) {
+    state.telemetryStale = true;
     clearTelemetry();
   }
   if (previewController) {
@@ -161,6 +218,8 @@ function setState(name) {
       previewController.start();
     } else if (!isPreviewActive && wasPreviewActive) {
       previewController.stop();
+    } else if (isPreviewActive && !el("preview")?.getAttribute("src")) {
+      previewController.start();
     }
   }
   if (!isPreviewActive) {
@@ -321,7 +380,12 @@ function tickTimers() {
     setField("uptime", `${h}h${m}m${s}s`);
   }
   if (state.lastTelemetryAt) {
-    const seconds = Math.floor((Date.now() - state.lastTelemetryAt) / 1000);
+    const ageMs = Date.now() - state.lastTelemetryAt;
+    if (ageMs > TELEMETRY_STALE_AFTER_MS) {
+      markTelemetryStale();
+      return;
+    }
+    const seconds = Math.floor(ageMs / 1000);
     setField("last-telemetry", `${seconds}s ago`);
   }
 }
@@ -418,6 +482,7 @@ function renderTelemetry(payload, sampleTime) {
   const storage = payload.storage || {};
 
   state.lastTelemetryAt = Date.now();
+  state.telemetryStale = false;
   setField("battery", isNumber(payload.battery_percent) ? `${payload.battery_percent}%` : "-");
   setField("gps", fmtBool(payload.gps_fix));
   setField("position-valid", fmtBool(payload.position_valid));
@@ -482,6 +547,7 @@ function renderTelemetry(payload, sampleTime) {
   setField("flight-hours", fmtMotorFlights(system));
   setField("storage-info", fmtStorage(storage));
   setField("telemetry-json", JSON.stringify(payload, null, 2));
+  syncTelemetryJsonHeight();
 }
 
 function connectTelemetryStream() {
@@ -498,7 +564,9 @@ function connectTelemetryStream() {
   });
   ws.addEventListener("close", () => {
     appendLog("[info] telemetry stream closed; reconnecting in 1 s");
+    state.telemetryStale = true;
     clearTelemetry();
+    previewController?.stop();
     setTimeout(connectTelemetryStream, STREAM_RECONNECT_DELAY_MS);
   });
 }
@@ -798,6 +866,7 @@ restoreRecInputs();
 clearTelemetry();
 refreshStatus();
 wirePreviewState();
+wireTelemetryJsonHeight();
 connectEventStream();
 connectTelemetryStream();
 refreshRecStatus();

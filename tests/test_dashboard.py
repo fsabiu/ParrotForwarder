@@ -77,6 +77,9 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "requestFullscreen" in response.text
     assert "parrotForwarder.theme" in response.text
     assert "document.documentElement.dataset.theme" in response.text
+    assert "TELEMETRY_STALE_AFTER_MS = 3000" in response.text
+    assert "ResizeObserver" in response.text
+    assert "syncTelemetryJsonHeight" in response.text
     assert '"READY"' in response.text
     assert '["READY", "STREAMING", "DEGRADED"]' in response.text
     assert "setInterval(refreshStatus, STATUS_REFRESH_INTERVAL_MS)" in response.text
@@ -91,6 +94,8 @@ def test_dashboard_css_served(client: TestClient) -> None:
     assert ':root[data-theme="light"]' in response.text
     assert ':root[data-theme="sun"]' in response.text
     assert "flex: 1 1 auto" in response.text
+    assert "overflow: hidden" in response.text
+    assert "min-height: 0" in response.text
     assert "order: -30" in response.text
     assert "flex: 1 1 100%" in response.text
 
