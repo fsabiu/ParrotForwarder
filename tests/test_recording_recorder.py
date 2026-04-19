@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -254,17 +253,25 @@ def test_file_path_layout(
     # We inspect the created file's relative path shape.
     async def _go() -> Path:
         rec = _make_recorder(root, index, mock_ffmpeg)
-        active = await rec.start(RecordingMeta(mission_id="alpha", drone_id="anafi42"))
+        active = await rec.start(
+            RecordingMeta(
+                mission_id="alpha",
+                drone_id="anafi42",
+                session_id="controller-a",
+                notes="field test",
+            )
+        )
         await asyncio.sleep(0.05)
         await rec.stop()
         return Path(active.path)
 
     path = asyncio.run(_go())
     parts = path.relative_to(root).parts
-    # <date>/<mission>/<drone>_<session>_<iso>.ts
+    # <date>/<mission>/<mission>_<drone>_<notes>_<iso>.ts
     assert parts[0].startswith("20")  # YYYY-...
     assert parts[1] == "alpha"
-    assert parts[2].startswith("anafi42_")
+    assert parts[2].startswith("alpha_anafi42_field_test_")
+    assert "controller-a" not in parts[2]
     assert parts[2].endswith(".ts")
 
 

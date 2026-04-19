@@ -160,7 +160,7 @@ class Recorder:
                 started_at=started_at,
                 mission_id=meta.mission_id,
                 drone_id=meta.drone_id,
-                session_id=meta.session_id or recording_id,
+                notes=meta.notes,
             )
             full_path = self._root / rel_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -495,14 +495,18 @@ def _build_relative_path(
     started_at: datetime,
     mission_id: str | None,
     drone_id: str | None,
-    session_id: str,
+    notes: str | None,
 ) -> Path:
     date_part = started_at.strftime("%Y-%m-%d")
     mission = _safe_segment(mission_id) if mission_id else "default"
     drone = _safe_segment(drone_id) if drone_id else "drone"
-    session = _safe_segment(session_id)
+    note = _safe_segment(notes) if notes else None
     iso_compact = started_at.strftime("%Y-%m-%dT%H-%M-%SZ")
-    filename = f"{drone}_{session}_{iso_compact}.ts"
+    filename_parts = [mission, drone]
+    if note:
+        filename_parts.append(note)
+    filename_parts.append(iso_compact)
+    filename = "_".join(filename_parts) + ".ts"
     return Path(date_part) / mission / filename
 
 
@@ -514,7 +518,7 @@ def _safe_segment(raw: str) -> str:
             out.append(ch)
         else:
             out.append("_")
-    return "".join(out) or "unknown"
+    return "".join(out).strip("_") or "unknown"
 
 
 def _iso(dt: datetime) -> str:

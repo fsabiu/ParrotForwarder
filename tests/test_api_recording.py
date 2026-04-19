@@ -134,7 +134,12 @@ def test_list_and_metadata_and_download(app_and_root) -> None:
     with TestClient(app) as client:
         r = client.post(
             "/recording/start",
-            json={"mission_id": "alpha", "drone_id": "drone-01", "notes": "field test"},
+            json={
+                "mission_id": "alpha",
+                "drone_id": "drone-01",
+                "session_id": "controller-a",
+                "notes": "field test",
+            },
         )
         rid = r.json()["recording_id"]
         import time
@@ -165,6 +170,7 @@ def test_list_and_metadata_and_download(app_and_root) -> None:
             'filename="alpha_drone-01_field_test_'
             in r.headers["content-disposition"]
         )
+        assert "controller-a" not in r.headers["content-disposition"]
         assert len(r.content) > 0
 
 
