@@ -49,3 +49,10 @@ preview:
 metrics:
   enabled: true                    # reloadable - /metrics Prometheus endpoint
   path: "/metrics"
+
+recording:
+  enabled: true                    # master switch; API still responds when false
+  path: "/recordings"              # directory for .ts files, sidecars, index.db
+  auto_on_takeoff: false           # start/stop recording with takeoff/landing
+  max_bytes_per_file: 10737418240  # safety cap per file (10 GiB)
+  retention_days: 90               # 0 disables retention

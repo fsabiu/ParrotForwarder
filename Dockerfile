@@ -24,7 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         curl \
+        ffmpeg \
         git \
+        iproute2 \
         libbz2-dev \
         libffi-dev \
         libjpeg-dev \
@@ -58,6 +60,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG PYENV_VERSION=v2.4.17
 ARG PYTHON_VERSION=3.11.10
 
+# -j2 caps the Python source compile at 2 parallel jobs so we do not spike RAM
+# on memory-tight builders (Apple Silicon VirtualBox VMs with ~8 GiB get OOM
+# thrash otherwise during the pip/Olympe step that follows).
+ENV MAKE_OPTS="-j2" \
+    MAKEFLAGS="-j2" \
+    PYTHON_CONFIGURE_OPTS="--enable-shared"
 RUN git clone --branch ${PYENV_VERSION} --depth 1 \
         https://github.com/pyenv/pyenv.git /root/.pyenv \
     && /root/.pyenv/bin/pyenv install ${PYTHON_VERSION}
@@ -71,21 +79,30 @@ COPY pyproject.toml requirements.txt requirements-dev.txt ./
 COPY src/ ./src/
 COPY ParrotForwarder.py ./
 COPY config.yaml.example ./
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-# Create the venv, install runtime deps (incl. Olympe), force-pin protobuf,
-# install the package in editable mode.
+# Create the venv and install in three staged RUN layers so pip peak memory
+# stays bounded (Olympe pulls heavy wheels; doing it all in one RUN pushed
+# an 8 GiB VirtualBox VM into OOM/swap thrash).
 RUN /root/.pyenv/versions/${PYTHON_VERSION}/bin/python -m venv /opt/pf/.venv \
-    && /opt/pf/.venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && /opt/pf/.venv/bin/pip install --no-cache-dir -e . \
-    && /opt/pf/.venv/bin/pip install --no-cache-dir --force-reinstall "protobuf==3.20.3"
+    && /opt/pf/.venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN /opt/pf/.venv/bin/pip install --no-cache-dir -e .
+RUN /opt/pf/.venv/bin/pip install --no-cache-dir --force-reinstall "protobuf==3.20.3"
 
-# Seed default config if none is mounted in at runtime.
-RUN mkdir -p /etc/parrot-forwarder \
-    && cp config.yaml.example /etc/parrot-forwarder/config.yaml
+# ---------------------------------------------------------------------------
+# Non-root user + pre-owned volume paths
+# ---------------------------------------------------------------------------
+
+RUN useradd --uid 1000 --create-home --shell /bin/bash parrot \
+    && mkdir -p /recordings /var/log/parrot-forwarder /etc/parrot-forwarder \
+    && chown -R parrot:parrot /opt/pf /recordings /var/log/parrot-forwarder /etc/parrot-forwarder \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
+
+USER parrot
 
 EXPOSE 8080 8890 12345/udp
 
-ENTRYPOINT ["/opt/pf/.venv/bin/parrot-forwarder-supervisor", "--config", "/etc/parrot-forwarder/config.yaml"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # ---------------------------------------------------------------------------
 # Running
@@ -94,17 +111,27 @@ ENTRYPOINT ["/opt/pf/.venv/bin/parrot-forwarder-supervisor", "--config", "/etc/p
 # USB passthrough for the Skycontroller 3 (vendor:product 0430:f001; adjust
 # if your device differs):
 #
+#     docker compose up -d
+#
+# Preferred invocation. The compose file at the repo root wires USB
+# passthrough, host networking, the bind-mounted config directory, and the
+# recordings volume that surfaces in the host file system.
+#
+# One-shot run without compose:
+#
 #     docker run --rm --name pf \
 #         --device=/dev/bus/usb \
 #         --network host \
+#         --user 1000:1000 \
 #         -e PARROT_FORWARDER_SUPERVISOR__HTTP__BIND=0.0.0.0 \
-#         -v /etc/parrot-forwarder/config.yaml:/etc/parrot-forwarder/config.yaml:ro \
+#         -v $(pwd)/config:/etc/parrot-forwarder \
+#         -v $(pwd)/recordings:/recordings \
 #         ghcr.io/fsabiu/parrot-forwarder:2.0.0
 #
 # --network host is required so SRT (port 8890) and the dashboard (port 8080)
 # are reachable on the LAN without additional port maps.
 # --device=/dev/bus/usb grants the container access to the Skycontroller
-# USB interface. If you want tighter scope, use
+# USB interface. For tighter scope, use
 #
 #     --device=/dev/bus/usb/<BUS>/<DEVICE>
 #

@@ -103,6 +103,11 @@ def test_defaults_when_no_layers_provided() -> None:
     assert cfg.logging.level == "INFO"
     assert cfg.logging.format == "json"
     assert cfg.metrics.enabled is True
+    assert cfg.recording.enabled is True
+    assert cfg.recording.path == "/recordings"
+    assert cfg.recording.auto_on_takeoff is False
+    assert cfg.recording.max_bytes_per_file == 10 * 1024 * 1024 * 1024
+    assert cfg.recording.retention_days == 90
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +311,36 @@ def test_reloadable_paths_set_matches_spec() -> None:
             "metrics.enabled",
         }
     )
+
+
+def test_recording_fields_are_not_reloadable() -> None:
+    """All recording fields affect the ffmpeg child process or disk layout."""
+    old = load_config()
+    new = load_config(cli_overrides={"recording": {"path": "/tmp/recs"}})
+    result = reload_config(old, new)
+    assert result.new_config is old
+    assert "recording.path" in result.rejected
+
+
+def test_recording_from_yaml(tmp_path: Path) -> None:
+    body = dedent(
+        """
+        recording:
+          enabled: false
+          path: "/data/recs"
+          auto_on_takeoff: true
+          max_bytes_per_file: 1073741824
+          retention_days: 7
+        """
+    ).strip()
+    path = tmp_path / "r.yaml"
+    path.write_text(body, encoding="utf-8")
+    cfg = load_config(path=path)
+    assert cfg.recording.enabled is False
+    assert cfg.recording.path == "/data/recs"
+    assert cfg.recording.auto_on_takeoff is True
+    assert cfg.recording.max_bytes_per_file == 1_073_741_824
+    assert cfg.recording.retention_days == 7
 
 
 # ---------------------------------------------------------------------------

@@ -176,6 +176,45 @@ class MetricsConfig(BaseModel):
     path: str = Field(default="/metrics")
 
 
+class RecordingConfig(BaseModel):
+    """Recording subprocess parameters.
+
+    Recording runs as a sibling ``ffmpeg`` process that consumes the
+    forwarder's own SRT output and writes an MPEG-TS file preserving both
+    the H.264 video stream and the KLV data stream. Files land under
+    ``path`` in a deterministic ``YYYY-MM-DD/<mission>/<drone>_<session>_<start>.ts``
+    layout and are indexed in ``<path>/index.db``.
+
+    None of these fields are reloadable at runtime: they affect the child
+    subprocess command line and the file layout on disk.
+    """
+
+    model_config = _STRICT
+
+    enabled: bool = Field(
+        default=True,
+        description="Master switch for the recording feature (API still responds when false)",
+    )
+    path: str = Field(
+        default="/recordings",
+        description="Directory where .ts files, sidecars, and index.db live",
+    )
+    auto_on_takeoff: bool = Field(
+        default=False,
+        description="Start recording automatically on takeoff; stop on landing",
+    )
+    max_bytes_per_file: int = Field(
+        default=10 * 1024 * 1024 * 1024,  # 10 GiB
+        ge=1024 * 1024,
+        description="Safety cap on a single recording; recorder stops gracefully at this size",
+    )
+    retention_days: int = Field(
+        default=90,
+        ge=0,
+        description="0 disables retention; otherwise unflagged recordings older than this are deleted",
+    )
+
+
 class Config(BaseModel):
     """Top-level ParrotForwarder v2 configuration.
 
@@ -191,6 +230,7 @@ class Config(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     preview: PreviewConfig = Field(default_factory=PreviewConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    recording: RecordingConfig = Field(default_factory=RecordingConfig)
 
 
 # ---------------------------------------------------------------------------

@@ -392,6 +392,21 @@ function handleEvent(msg) {
     appendLog(`[restart] #${msg.count} reason=${msg.reason}`);
   } else if (msg.type === "log") {
     appendLog(`[${msg.level}] ${msg.message}`);
+  } else if (msg.type === "recording.started") {
+    const id = msg.payload?.recording_id?.slice(0, 8) ?? "?";
+    appendLog(`[rec] started ${id}`);
+    refreshRecStatus();
+  } else if (msg.type === "recording.stopped") {
+    const id = msg.payload?.recording_id?.slice(0, 8) ?? "?";
+    appendLog(`[rec] stopped ${id}`);
+    refreshRecStatus();
+    refreshRecList();
+    refreshRecDisk();
+  } else if (msg.type === "recording.error") {
+    const id = msg.payload?.recording_id?.slice(0, 8) ?? "?";
+    appendLog(`[rec] error ${id}: ${msg.payload?.reason ?? "(no detail)"}`);
+    refreshRecStatus();
+    refreshRecList();
   }
 }
 
@@ -426,10 +441,247 @@ el("btn-reset").addEventListener("click", () =>
   postControl("/control/reset", { reason: "dashboard" })
 );
 
+// ---------------------------------------------------------------------------
+// Recording
+// ---------------------------------------------------------------------------
+
+const recState = {
+  active: false,
+  startedAt: null,
+  bytes: 0,
+};
+
+const REC_INPUT_KEYS = {
+  "rec-mission": "parrotForwarder.rec.mission",
+  "rec-drone": "parrotForwarder.rec.drone",
+  "rec-notes": "parrotForwarder.rec.notes",
+};
+
+function restoreRecInputs() {
+  for (const [id, key] of Object.entries(REC_INPUT_KEYS)) {
+    const node = el(id);
+    if (!node) continue;
+    const stored = localStorage.getItem(key);
+    if (stored != null) node.value = stored;
+    node.addEventListener("change", () => {
+      localStorage.setItem(key, node.value);
+    });
+  }
+}
+
+function humanBytes(n) {
+  if (n == null) return "-";
+  if (n < 1024) return `${n} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let v = n / 1024;
+  let u = 0;
+  while (v >= 1024 && u < units.length - 1) {
+    v /= 1024;
+    u += 1;
+  }
+  return `${v.toFixed(v >= 10 || u === 0 ? 0 : 1)} ${units[u]}`;
+}
+
+function humanDuration(s) {
+  if (s == null) return "-";
+  const sec = Math.floor(s);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const rs = sec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(rs).padStart(2, "0")}`;
+  return `${m}:${String(rs).padStart(2, "0")}`;
+}
+
+function setRecIndicator(active) {
+  const node = el("rec-indicator");
+  if (!node) return;
+  node.textContent = active ? "REC" : "off";
+  node.className = `rec-indicator ${active ? "rec-on" : "rec-off"}`;
+}
+
+function setRecButtonsForState(active) {
+  const btnStart = el("btn-rec-start");
+  const btnStop = el("btn-rec-stop");
+  if (btnStart) btnStart.disabled = active;
+  if (btnStop) btnStop.disabled = !active;
+}
+
+async function refreshRecStatus() {
+  try {
+    const r = await fetch("/recording/status");
+    if (!r.ok) return;
+    const s = await r.json();
+    recState.active = !!s.active;
+    if (s.active) {
+      recState.startedAt = Date.parse(s.started_at);
+      recState.bytes = s.bytes || 0;
+      setField("rec-status", `recording (id ${s.recording_id?.slice(0, 8) || "?"})`);
+      setField("rec-elapsed", humanDuration(s.elapsed_s));
+      setField("rec-bytes", humanBytes(s.bytes));
+      setField("rec-file", s.path || "-");
+    } else {
+      recState.startedAt = null;
+      recState.bytes = 0;
+      setField("rec-status", "idle");
+      setField("rec-elapsed", "-");
+      setField("rec-bytes", "-");
+      setField("rec-file", "-");
+    }
+    setRecIndicator(recState.active);
+    setRecButtonsForState(recState.active);
+  } catch (e) {
+    // Network hiccup; leave state as-is.
+  }
+}
+
+async function refreshRecDisk() {
+  try {
+    const r = await fetch("/recording/disk");
+    if (!r.ok) return;
+    const d = await r.json();
+    setField("rec-disk-used", humanBytes(d.used_bytes));
+    setField("rec-disk-total", humanBytes(d.total_bytes));
+    setField("rec-disk-free", humanBytes(d.free_bytes));
+    setField("rec-disk-count", d.count);
+    const fill = el("rec-disk-bar-fill");
+    if (fill && d.total_bytes > 0) {
+      const pct = Math.min(100, (d.used_bytes / d.total_bytes) * 100);
+      fill.style.width = `${pct}%`;
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function refreshRecList() {
+  try {
+    const r = await fetch("/recording/list?limit=50");
+    if (!r.ok) return;
+    const rows = await r.json();
+    const body = el("rec-list-body");
+    if (!body) return;
+    body.innerHTML = "";
+    if (rows.length === 0) {
+      const tr = document.createElement("tr");
+      tr.className = "rec-list-empty";
+      tr.innerHTML = '<td colspan="5">No recordings yet.</td>';
+      body.appendChild(tr);
+      return;
+    }
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      tr.dataset.id = row.id;
+      const startCell = document.createElement("td");
+      startCell.textContent = row.started_at;
+      const durCell = document.createElement("td");
+      durCell.textContent = humanDuration(row.duration_s);
+      const sizeCell = document.createElement("td");
+      sizeCell.textContent = humanBytes(row.bytes);
+      const missionCell = document.createElement("td");
+      missionCell.textContent = row.mission_id || "-";
+      const actionsCell = document.createElement("td");
+      const download = document.createElement("a");
+      download.textContent = "Download";
+      download.href = `/recording/${row.id}/download`;
+      download.className = "small-link";
+      download.target = "_blank";
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "Delete";
+      delBtn.className = "small danger";
+      delBtn.addEventListener("click", () => handleRecDelete(row.id));
+      actionsCell.append(download, " ", delBtn);
+      tr.append(startCell, durCell, sizeCell, missionCell, actionsCell);
+      if (row.state === "error") tr.classList.add("rec-row-error");
+      body.appendChild(tr);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function handleRecStart() {
+  const body = {
+    mission_id: el("rec-mission")?.value || undefined,
+    drone_id: el("rec-drone")?.value || undefined,
+    notes: el("rec-notes")?.value || undefined,
+  };
+  try {
+    const r = await fetch("/recording/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const p = await r.json().catch(() => ({}));
+      appendLog(`[rec] start failed: ${p.title || r.statusText}`);
+      return;
+    }
+    const data = await r.json();
+    appendLog(`[rec] started ${data.recording_id?.slice(0, 8)} -> ${data.path}`);
+    await refreshRecStatus();
+    await refreshRecDisk();
+  } catch (e) {
+    appendLog(`[rec] start error: ${e.message}`);
+  }
+}
+
+async function handleRecStop() {
+  try {
+    const r = await fetch("/recording/stop", { method: "POST" });
+    if (!r.ok) {
+      const p = await r.json().catch(() => ({}));
+      appendLog(`[rec] stop failed: ${p.title || r.statusText}`);
+      return;
+    }
+    const data = await r.json();
+    appendLog(
+      `[rec] stopped ${data.recording_id?.slice(0, 8)} duration=${humanDuration(
+        data.duration_s
+      )} size=${humanBytes(data.bytes)}`
+    );
+    await refreshRecStatus();
+    await refreshRecList();
+    await refreshRecDisk();
+  } catch (e) {
+    appendLog(`[rec] stop error: ${e.message}`);
+  }
+}
+
+async function handleRecDelete(id) {
+  if (!confirm(`Delete recording ${id.slice(0, 8)}...? (soft-delete, moves to .trash/)`)) return;
+  try {
+    const r = await fetch(`/recording/${id}`, { method: "DELETE" });
+    if (!r.ok) {
+      const p = await r.json().catch(() => ({}));
+      appendLog(`[rec] delete failed: ${p.title || r.statusText}`);
+      return;
+    }
+    appendLog(`[rec] deleted ${id.slice(0, 8)}`);
+    await refreshRecList();
+    await refreshRecDisk();
+  } catch (e) {
+    appendLog(`[rec] delete error: ${e.message}`);
+  }
+}
+
+el("btn-rec-start")?.addEventListener("click", handleRecStart);
+el("btn-rec-stop")?.addEventListener("click", handleRecStop);
+el("btn-rec-refresh")?.addEventListener("click", () => {
+  refreshRecList();
+  refreshRecDisk();
+});
+
+restoreRecInputs();
+
 clearTelemetry();
 refreshStatus();
 wirePreviewState();
 connectEventStream();
 connectTelemetryStream();
+refreshRecStatus();
+refreshRecList();
+refreshRecDisk();
 setInterval(tickTimers, 1000);
 setInterval(refreshStatus, 5000);
+setInterval(refreshRecStatus, 2000);
+setInterval(refreshRecDisk, 15000);

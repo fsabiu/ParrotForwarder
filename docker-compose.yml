@@ -6,6 +6,7 @@ services:
     container_name: parrot-forwarder
     init: true
     restart: unless-stopped
+    stop_grace_period: 30s
     network_mode: host
     devices:
       - /dev/bus/usb:/dev/bus/usb
@@ -14,8 +15,8 @@ services:
       PARROT_FORWARDER_SUPERVISOR__AUTO_START: "true"
     volumes:
       - ./var/log/parrot-forwarder:/var/log/parrot-forwarder
-      # Mount your own config if you do not want the image default.
-      # - /etc/parrot-forwarder/config.yaml:/etc/parrot-forwarder/config.yaml:ro
+      - ./config:/etc/parrot-forwarder
+      - ./recordings:/recordings
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 10s

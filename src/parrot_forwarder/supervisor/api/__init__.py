@@ -25,10 +25,15 @@ from starlette.types import ASGIApp
 
 from ...dashboard import static_dir as dashboard_static_dir
 from ...state_machine import UserReset, UserStart, UserStop
+from .recording import create_recording_router
 
 if TYPE_CHECKING:
+    from pathlib import Path as _Path
+
     from ...config import Config
     from .. import Supervisor
+    from ..recording.index import RecordingIndex
+    from ..recording.recorder import Recorder
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +74,24 @@ class Problem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def create_app(supervisor: Supervisor, config: "Config | None" = None) -> FastAPI:
+def create_app(
+    supervisor: Supervisor,
+    config: "Config | None" = None,
+    *,
+    recorder: "Recorder | None" = None,
+    recording_index: "RecordingIndex | None" = None,
+    recordings_root: "_Path | None" = None,
+) -> FastAPI:
     """Build the FastAPI app wired to ``supervisor``.
 
     The supervisor is passed in explicitly rather than pulled from a
     global so tests can construct many instances side-by-side. ``config``
     is optional for unit tests; when omitted the live MJPEG preview is
     disabled and ``/preview/stream.mjpg`` returns 503.
+
+    If ``recorder``, ``recording_index`` and ``recordings_root`` are all
+    supplied, the recording endpoints are mounted under ``/recording``.
+    Tests that do not exercise recording can omit them.
     """
     app = FastAPI(
         title="ParrotForwarder Supervisor",
@@ -102,6 +118,10 @@ def create_app(supervisor: Supervisor, config: "Config | None" = None) -> FastAP
     _register_routes(app, supervisor)
     _register_dashboard(app)
     _register_preview(app, config)
+    if recorder is not None and recording_index is not None and recordings_root is not None:
+        app.include_router(
+            create_recording_router(recorder, recording_index, recordings_root)
+        )
     return app
 
 

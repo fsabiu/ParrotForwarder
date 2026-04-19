@@ -33,6 +33,8 @@ from .api import create_app
 from .api.stream import Broadcaster, publish_state_transition, register_stream_routes
 from .health import HealthMonitor, HealthThresholds, run_health_poll_loop
 from .ipc import WorkerProcessConfig, build_subprocess_worker_factory
+from .recording.index import RecordingIndex
+from .recording.recorder import Recorder
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +262,43 @@ async def _amain(args: argparse.Namespace) -> int:
 
     _install_event_bridge(supervisor, events)
 
-    app = create_app(supervisor, config=cfg)
+    recorder: Recorder | None = None
+    recording_index: RecordingIndex | None = None
+    recordings_root: Path | None = None
+    if cfg.recording.enabled:
+        recordings_root = Path(cfg.recording.path)
+        try:
+            recordings_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "recordings path %s unavailable (%s); recording disabled", recordings_root, exc
+            )
+            recordings_root = None
+        if recordings_root is not None:
+            recording_index = RecordingIndex.open(recordings_root / "index.db")
+
+            async def _recorder_event_sink(event_type: str, payload: dict[str, object]) -> None:
+                await events.publish({"type": event_type, "payload": payload})
+
+            recorder = Recorder(
+                root_path=recordings_root,
+                index=recording_index,
+                srt_port=cfg.forwarder.srt_port,
+                event_sink=_recorder_event_sink,
+            )
+            reconciled = recorder.reconcile_active_rows()
+            if reconciled:
+                logger.info(
+                    "reconciled %d orphan recording row(s) at startup", len(reconciled)
+                )
+
+    app = create_app(
+        supervisor,
+        config=cfg,
+        recorder=recorder,
+        recording_index=recording_index,
+        recordings_root=recordings_root,
+    )
     register_stream_routes(app, events=events, telemetry=telemetry)
 
     config = uvicorn.Config(
@@ -304,6 +342,13 @@ async def _amain(args: argparse.Namespace) -> int:
     try:
         await server.serve()
     finally:
+        if recorder is not None:
+            try:
+                await recorder.shutdown()
+            except Exception:  # noqa: BLE001
+                logger.exception("recorder shutdown failed")
+        if recording_index is not None:
+            recording_index.close()
         supervisor.stop()
         for task in (health_task, supervisor_task):
             if task is health_task and not task.done():

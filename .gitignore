@@ -72,6 +72,11 @@ video_frames/
 *.mp4
 *.h264
 
+# Runtime data (created by docker compose up)
+recordings/
+!recordings/.gitkeep
+config/parrot-forwarder.yaml
+
 # Logs
 *.log
 logs/

@@ -97,6 +97,51 @@
       <button id="btn-reset">Reset</button>
     </section>
 
+    <section class="panel recording">
+      <h2>Recording</h2>
+      <div class="rec-controls">
+        <button id="btn-rec-start">Start recording</button>
+        <button id="btn-rec-stop" disabled>Stop recording</button>
+        <span id="rec-indicator" class="rec-indicator rec-off">off</span>
+      </div>
+      <dl>
+        <dt>Status</dt><dd id="rec-status">idle</dd>
+        <dt>Elapsed</dt><dd id="rec-elapsed">-</dd>
+        <dt>Bytes</dt><dd id="rec-bytes">-</dd>
+        <dt>File</dt><dd id="rec-file">-</dd>
+      </dl>
+      <div class="rec-meta">
+        <label>Mission ID <input id="rec-mission" placeholder="mission id (optional)" /></label>
+        <label>Drone ID <input id="rec-drone" placeholder="drone id (optional)" /></label>
+        <label>Notes <input id="rec-notes" placeholder="notes" /></label>
+      </div>
+      <div class="rec-disk">
+        <strong>Disk</strong> <span id="rec-disk-used">-</span> used of <span id="rec-disk-total">-</span>
+        (<span id="rec-disk-free">-</span> free, <span id="rec-disk-count">0</span> files)
+        <div class="rec-disk-bar"><div id="rec-disk-bar-fill"></div></div>
+      </div>
+      <div class="rec-list-wrap">
+        <div class="rec-list-header">
+          <strong>Recent recordings</strong>
+          <button id="btn-rec-refresh" class="small">Refresh</button>
+        </div>
+        <table class="rec-list">
+          <thead>
+            <tr>
+              <th>Start</th>
+              <th>Duration</th>
+              <th>Size</th>
+              <th>Mission</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rec-list-body">
+            <tr class="rec-list-empty"><td colspan="5">No recordings yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="panel">
       <h2>Platform</h2>
       <dl>
