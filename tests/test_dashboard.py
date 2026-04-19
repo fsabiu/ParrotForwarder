@@ -49,12 +49,16 @@ def test_dashboard_index_served(client: TestClient) -> None:
     assert response.headers["cache-control"] == "no-cache"
     assert "ParrotForwarder" in response.text
     assert "state-badge" in response.text  # hook-up point for JS
+    assert "btn-restart" in response.text
     assert "preview-frame" in response.text
     assert "Waiting for live video" in response.text
     assert "btn-preview-fullscreen" in response.text
+    assert "Flight state" in response.text
     assert "telemetry-json" in response.text
     assert "app.js" in response.text
     assert "style.css" in response.text
+    assert "btn-start" not in response.text
+    assert "btn-stop" not in response.text
 
 
 def test_dashboard_js_served(client: TestClient) -> None:
@@ -63,11 +67,13 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert response.headers["content-type"].startswith("application/javascript")
     assert response.headers["cache-control"] == "no-cache"
     assert "/control/start" in response.text, "dashboard JS must hit REST contract"
+    assert "/control/reset" in response.text
     assert "/stream/events" in response.text
     assert "preview-frame" in response.text
     assert "/preview/stream.mjpg" in response.text
     assert "requestFullscreen" in response.text
     assert '"READY"' in response.text
+    assert '["READY", "STREAMING", "DEGRADED"]' in response.text
 
 
 def test_dashboard_css_served(client: TestClient) -> None:

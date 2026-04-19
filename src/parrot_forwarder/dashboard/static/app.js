@@ -72,7 +72,7 @@ function previewMessageForState(name) {
 }
 
 function previewStateActive(name) {
-  return ["STREAMING", "DEGRADED"].includes(name);
+  return ["READY", "STREAMING", "DEGRADED"].includes(name);
 }
 
 function updatePreviewFullscreenButton() {
@@ -138,7 +138,7 @@ function fmtBool(value) {
   return value === true ? "yes" : value === false ? "no" : "-";
 }
 
-function fmtCoords(latitude, longitude, digits = 6) {
+function fmtCoords(latitude, longitude, digits = 4) {
   if (!isNumber(latitude) || !isNumber(longitude)) return "-";
   return `${latitude.toFixed(digits)}, ${longitude.toFixed(digits)}`;
 }
@@ -190,7 +190,7 @@ function fmtKlvCoords(position = {}) {
   const klv = position.klv || {};
   if (!isNumber(klv.latitude) || !isNumber(klv.longitude)) return "-";
   const altitude = isNumber(klv.altitude_msl_m) ? ` @ ${klv.altitude_msl_m.toFixed(1)} m` : "";
-  return `${klv.latitude.toFixed(6)}, ${klv.longitude.toFixed(6)}${altitude}`;
+  return `${klv.latitude.toFixed(4)}, ${klv.longitude.toFixed(4)}${altitude}`;
 }
 
 function fmtRecording(camera = {}) {
@@ -383,15 +383,15 @@ function renderTelemetry(payload, sampleTime) {
 
   setField("position-source", position.source || "-");
   setField("position-message", position.message || "-");
-  setField("position-coords", fmtCoords(position.latitude, position.longitude));
+  setField("position-coords", fmtCoords(position.latitude, position.longitude, 4));
   setField("position-altitudes", fmtAltitudes(position));
   setField("position-accuracy", fmtAccuracy(position));
-  setField("home-coords", fmtCoords(position.home?.latitude, position.home?.longitude));
+  setField("home-coords", fmtCoords(position.home?.latitude, position.home?.longitude, 4));
   setField("klv-coords", fmtKlvCoords(position));
 
-  setField("gimbal-abs", fmtAxisTriplet(gimbal.absolute_deg));
-  setField("gimbal-rel", fmtAxisTriplet(gimbal.relative_deg));
-  setField("gimbal-offsets", fmtAxisTriplet(gimbal.offset_deg));
+  setField("gimbal-abs", fmtAxisTriplet(gimbal.absolute_deg, 2));
+  setField("gimbal-rel", fmtAxisTriplet(gimbal.relative_deg, 2));
+  setField("gimbal-offsets", fmtAxisTriplet(gimbal.offset_deg, 2));
   setField(
     "gimbal-frames",
     [
@@ -420,7 +420,7 @@ function renderTelemetry(payload, sampleTime) {
       .join(" | ") || "-"
   );
   setField("camera-recording", fmtRecording(camera));
-  setField("camera-alignment", fmtAxisTriplet(camera.alignment_deg));
+  setField("camera-alignment", fmtAxisTriplet(camera.alignment_deg, 2));
   setField("camera-alignment-bounds", fmtAxisBounds(camera.alignment_bounds_deg));
 
   setField("flying-state", flight.state || "-");
@@ -507,11 +507,11 @@ async function postControl(endpoint, body) {
   appendLog(`[control] ${endpoint} -> state=${body_.state ?? "?"}`);
 }
 
-el("btn-start").addEventListener("click", () => postControl("/control/start"));
-el("btn-stop").addEventListener("click", () => postControl("/control/stop"));
-el("btn-reset").addEventListener("click", () =>
-  postControl("/control/reset", { reason: "dashboard" })
-);
+async function handleRestart() {
+  const endpoint = state.serviceState === "DISCONNECTED" ? "/control/start" : "/control/reset";
+  const body = endpoint === "/control/reset" ? { reason: "dashboard restart" } : undefined;
+  await postControl(endpoint, body);
+}
 
 // ---------------------------------------------------------------------------
 // Recording
@@ -736,6 +736,7 @@ async function handleRecDelete(id) {
   }
 }
 
+el("btn-restart")?.addEventListener("click", handleRestart);
 el("btn-rec-start")?.addEventListener("click", handleRecStart);
 el("btn-rec-stop")?.addEventListener("click", handleRecStop);
 el("btn-rec-refresh")?.addEventListener("click", () => {

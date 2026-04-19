@@ -37,6 +37,12 @@ h1 {
   letter-spacing: 0.04em;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 h2 {
   margin: 0 0 0.75rem;
   font-size: 0.9rem;
@@ -59,6 +65,22 @@ h2 {
 .state-streaming    { background: #1f6a42; color: #eefdf3; }
 .state-degraded     { background: #9a4d25; color: #fff2ea; }
 .state-restarting   { background: #7d2f4b; color: #fff0f6; }
+
+.header-button {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #345069;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #26435a, #1d3142);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.header-button:hover {
+  background: linear-gradient(180deg, #2d516d, #22394d);
+}
 
 main {
   display: grid;
@@ -188,26 +210,18 @@ dd {
   font-size: 0.78rem;
 }
 
-.controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.telemetry-compact .compact-dl {
+  grid-template-columns: minmax(6.5rem, auto) 1fr;
+  gap: 0.28rem 0.65rem;
 }
 
-.controls button {
-  width: 100%;
-  padding: 0.7rem 1rem;
-  border: 1px solid #345069;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #26435a, #1d3142);
-  color: var(--text);
+.telemetry-compact dt {
+  font-size: 0.76rem;
+}
+
+.telemetry-compact dd {
+  font-size: 0.83rem;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-}
-
-.controls button:hover {
-  background: linear-gradient(180deg, #2d516d, #22394d);
 }
 
 .raw pre {
@@ -433,6 +447,11 @@ button.small.danger {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.5rem;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   dl {
