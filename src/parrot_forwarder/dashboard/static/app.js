@@ -154,7 +154,7 @@ function previewMessageForState(name) {
 }
 
 function previewStateActive(name) {
-  return ["READY", "STREAMING", "DEGRADED"].includes(name);
+  return ["STREAMING", "DEGRADED"].includes(name);
 }
 
 function updatePreviewFullscreenButton() {
@@ -206,7 +206,7 @@ function setState(name) {
     state.previewSuppressed = false;
     setField("uptime", "-");
   }
-  if (!["STREAMING", "DEGRADED", "READY"].includes(name)) {
+  if (!["STREAMING", "DEGRADED"].includes(name)) {
     state.telemetryStale = true;
     clearTelemetry();
   }
@@ -534,6 +534,12 @@ function connectEventStream() {
 }
 
 function renderTelemetry(payload, sampleTime) {
+  if (!previewStateActive(state.serviceState)) {
+    state.telemetryStale = true;
+    clearTelemetry();
+    return;
+  }
+
   const position = payload.position || {};
   const gimbal = payload.gimbal || {};
   const camera = payload.camera || {};

@@ -85,8 +85,9 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "lastLiveSignalAt: null" in response.text
     assert "previewSuppressed: false" in response.text
     assert "state.previewSuppressed = true;" in response.text
-    assert '"READY"' in response.text
-    assert '["READY", "STREAMING", "DEGRADED"]' in response.text
+    assert "if (!previewStateActive(state.serviceState)) {" in response.text
+    assert '"RESTARTING"' in response.text
+    assert '["STREAMING", "DEGRADED"]' in response.text
     assert "setInterval(refreshStatus, STATUS_REFRESH_INTERVAL_MS)" in response.text
 
 

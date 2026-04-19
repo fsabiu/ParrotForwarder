@@ -48,14 +48,15 @@ class VideoForwarder(threading.Thread):
         self.gst_warnings = 0
         self.gst_errors = 0
         self.stderr_thread = None
+        self._gst_output = None
     
     def _monitor_gstreamer_stderr(self):
         """Monitor GStreamer stderr output for errors and warnings."""
-        if not self.gst_process:
+        if not self.gst_process or self._gst_output is None:
             return
         
         try:
-            for line in iter(self.gst_process.stderr.readline, ''):
+            for line in iter(self._gst_output.readline, ''):
                 if not line:
                     break
                 
@@ -75,6 +76,8 @@ class VideoForwarder(threading.Thread):
                     logger.error(f"GStreamer: {line}")
                 elif (
                     ('state change' in line_lower and 'playing' in line_lower)
+                    or ('state-changed' in line_lower and 'new-state=(gststate)playing' in line_lower)
+                    or ('state-changed' in line_lower and 'new-state=(string)playing' in line_lower)
                     or 'setting pipeline to playing' in line_lower
                     or 'new clock:' in line_lower
                 ):
@@ -233,7 +236,7 @@ class VideoForwarder(threading.Thread):
                 logger.info("Using LOW-LATENCY pipeline (better for good networks)")
                 pipeline = self._build_low_latency_pipeline(drone_rtsp_url)
 
-            cmd = ["/usr/bin/gst-launch-1.0", "-e"] + pipeline.split()
+            cmd = ["/usr/bin/gst-launch-1.0", "-m", "-e"] + pipeline.split()
 
             logger.info("Starting GStreamer pipeline")
             logger.info(f"Stream available at: srt://<your-ip>:{self.srt_port}")
@@ -244,9 +247,10 @@ class VideoForwarder(threading.Thread):
                 self.gst_process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     text=True
                 )
+                self._gst_output = self.gst_process.stdout
             except Exception as e:
                 logger.error(f"Error starting GStreamer: {e}")
                 if self._stop_event.wait(self.reconnect_delay_seconds):
@@ -272,9 +276,9 @@ class VideoForwarder(threading.Thread):
                         self.gst_process.returncode,
                     )
                     try:
-                        remaining_stderr = self.gst_process.stderr.read()
-                        if remaining_stderr:
-                            logger.error(f"Final GStreamer output: {remaining_stderr}")
+                        remaining_output = self._gst_output.read() if self._gst_output else ""
+                        if remaining_output:
+                            logger.error(f"Final GStreamer output: {remaining_output}")
                     except Exception:
                         pass
                     break
@@ -284,6 +288,7 @@ class VideoForwarder(threading.Thread):
 
             self.pipeline_playing = False
             self.gst_process = None
+            self._gst_output = None
             if self._stop_event.is_set():
                 break
             logger.info(
@@ -346,6 +351,7 @@ class VideoForwarder(threading.Thread):
                 logger.warning("GStreamer did not stop gracefully, killing...")
                 self.gst_process.kill()
             self.gst_process = None
+            self._gst_output = None
         self.pipeline_playing = False
         
         logger.info("✓ Video forwarder stopped")

@@ -223,6 +223,22 @@ class ParrotForwarder:
             return False
         
         try:
+            try:
+                from olympe.messages.drone_manager import connection_state as drone_manager_connection_state
+            except Exception:
+                drone_manager_connection_state = None
+
+            if drone_manager_connection_state is not None:
+                try:
+                    manager_state = self.drone.get_state(drone_manager_connection_state)
+                except Exception:
+                    manager_state = None
+                if isinstance(manager_state, dict) and "state" in manager_state:
+                    state_value = manager_state.get("state")
+                    state_name = getattr(state_value, "name", state_value)
+                    if state_name is not None:
+                        return str(state_name).lower() == "connected"
+
             connection_state = getattr(self.drone, "connection_state", None)
             if callable(connection_state):
                 return bool(connection_state())
