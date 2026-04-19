@@ -17,6 +17,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYENV_ROOT=/opt/pyenv \
     PATH=/opt/pf/.venv/bin:/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+# Some guest/VPN combinations advertise working IPv6 DNS answers while
+# outbound IPv6 is actually unavailable. Prefer IPv4 for apt and pip/build
+# downloads so container rebuilds stay reliable on those hosts.
+RUN printf 'precedence ::ffff:0:0/96  100\n' > /etc/gai.conf \
+    && printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4
+
 # ---------------------------------------------------------------------------
 # System dependencies
 # ---------------------------------------------------------------------------
