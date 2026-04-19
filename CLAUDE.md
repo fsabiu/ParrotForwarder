@@ -1,31 +1,65 @@
 # ParrotForwarder
 
-Captures H.264 video + MISB 0601 KLV telemetry from Parrot Anafi drones and muxes them into a single MPEG-TS stream over SRT.
+Captures H.264 video + MISB 0601 KLV telemetry from Parrot Anafi drones and
+muxes them into a single MPEG-TS stream over SRT.
 
-## Environment & Installation
+## Preferred deployment
 
-- Requires **Python 3.11+** and **Parrot Olympe SDK**
-- **Critical**: `protobuf==3.20.3` must stay below 4.0 for Python 3.11+ compatibility
-- Requires **system GStreamer 1.14+** (not the Anaconda/Conda version - mixing Conda and system GStreamer causes crashes)
-- Install: `pip install -r requirements.txt` in the Parrot Olympe conda environment
+Production should use `docker compose`, not an ad-hoc CLI session. The compose
+stack:
 
-## Running
+- binds the dashboard on `0.0.0.0:8080`
+- exposes the SRT stream on the machine's own network stack
+- mounts `./config` and `./recordings`
+- passes `/dev/bus/usb` through for the Skycontroller
+- restarts the container after crashes and guest reboots via
+  `restart: unless-stopped`
+
+## Requirements
+
+- Linux host or Linux VM guest with USB access to the controller
+- Python 3.11
+- Parrot Olympe SDK
+- system GStreamer 1.x
+- `protobuf==3.20.3`
+
+## Run in Docker
 
 ```bash
-# Basic usage
-python ParrotForwarder.py --drone-ip 192.168.42.1 --srt-port 8888
+docker compose up -d --build
+curl http://127.0.0.1:8080/health
+```
 
-# With auto-reconnect and custom telemetry rate
-python ParrotForwarder.py --drone-ip 192.168.42.1 --srt-port 8888 --auto-reconnect --telemetry-fps 10
+Dashboard address on the trusted LAN:
 
-# Run as systemd service (deployed on oracle user)
-sudo systemctl start parrot-forwarder
-sudo journalctl -u parrot-forwarder -f
+```text
+http://<machine-ip>:8080/
+```
+
+Find the machine IP from inside the Linux host or guest:
+
+```bash
+hostname -I
+ip -brief addr
+```
+
+If running in a VM, use bridged networking for the guest and enable USB
+passthrough for the Skycontroller before starting the stack.
+
+## Run under systemd
+
+`parrot_forwarder.service` is a generic template. Adjust `User`, `Group`, and
+`WorkingDirectory` for the target machine before enabling it.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now parrot_forwarder
+sudo journalctl -u parrot_forwarder -f
 ```
 
 ## Architecture
 
-```
+```text
 CLI (cli.py) -> ParrotForwarder coordinator (main.py)
                 ├── TelemetryForwarder thread (telemetry.py)
                 │     └── Parrot Olympe SDK -> KLV encoder (klv_encoder.py) -> UDP
@@ -33,16 +67,15 @@ CLI (cli.py) -> ParrotForwarder coordinator (main.py)
                       └── GStreamer: RTSP in -> mux KLV -> MPEG-TS over SRT out
 ```
 
-- **TelemetryForwarder**: polls drone state at 10 Hz, encodes to MISB 0601 KLV, sends via UDP
-- **VideoForwarder**: GStreamer pipeline receives RTSP from drone, muxes KLV, outputs SRT
-- **klv_encoder.py**: Custom MISB 0601 KLV encoder (13+ fields: GPS, attitude, gimbal, camera params, timestamps)
-- **Deployment**: systemd service, `oracle` user at `/home/oracle/ParrotForwarder/`, Anaconda `parrot` env
+- `telemetry.py`: polls drone state, normalizes it, and encodes MISB 0601 KLV
+- `video.py`: receives RTSP, muxes KLV, and publishes MPEG-TS over SRT
+- `dashboard/`: operator UI for health, control, telemetry, preview, and recording
+- `supervisor/`: FastAPI control plane, worker lifecycle, recording API, and dashboard
 
 ## Tests
 
 ```bash
-cd tests
-python test_drone_connection.py --drone-ip 192.168.42.1
-python test_klv_receiver.py      # Receive and decode KLV packets
-python test_video_stream.py      # Verify video output
+make test
+make lint
+make typecheck
 ```

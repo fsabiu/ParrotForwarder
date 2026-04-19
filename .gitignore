@@ -74,8 +74,7 @@ video_frames/
 
 # Runtime data (created by docker compose up)
 recordings/
-!recordings/.gitkeep
-config/parrot-forwarder.yaml
+config/config.yaml
 
 # Logs
 *.log
@@ -87,4 +86,3 @@ logs/
 before.txt
 after.txt
 output.log
-

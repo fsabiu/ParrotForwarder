@@ -14,7 +14,8 @@ FROM ubuntu:${UBUNTU_TAG}
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH=/opt/pf/.venv/bin:/root/.pyenv/bin:/root/.pyenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PYENV_ROOT=/opt/pyenv \
+    PATH=/opt/pf/.venv/bin:/opt/pyenv/bin:/opt/pyenv/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # ---------------------------------------------------------------------------
 # System dependencies
@@ -67,8 +68,8 @@ ENV MAKE_OPTS="-j2" \
     MAKEFLAGS="-j2" \
     PYTHON_CONFIGURE_OPTS="--enable-shared"
 RUN git clone --branch ${PYENV_VERSION} --depth 1 \
-        https://github.com/pyenv/pyenv.git /root/.pyenv \
-    && /root/.pyenv/bin/pyenv install ${PYTHON_VERSION}
+        https://github.com/pyenv/pyenv.git ${PYENV_ROOT} \
+    && ${PYENV_ROOT}/bin/pyenv install ${PYTHON_VERSION}
 
 # ---------------------------------------------------------------------------
 # Install the package
@@ -84,7 +85,9 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # Create the venv and install in three staged RUN layers so pip peak memory
 # stays bounded (Olympe pulls heavy wheels; doing it all in one RUN pushed
 # an 8 GiB VirtualBox VM into OOM/swap thrash).
-RUN /root/.pyenv/versions/${PYTHON_VERSION}/bin/python -m venv /opt/pf/.venv \
+# Copy the interpreter into the venv so the non-root runtime user does not
+# depend on traversing /root/.pyenv symlinks.
+RUN ${PYENV_ROOT}/versions/${PYTHON_VERSION}/bin/python -m venv --copies /opt/pf/.venv \
     && /opt/pf/.venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN /opt/pf/.venv/bin/pip install --no-cache-dir -e .
 RUN /opt/pf/.venv/bin/pip install --no-cache-dir --force-reinstall "protobuf==3.20.3"
@@ -93,12 +96,16 @@ RUN /opt/pf/.venv/bin/pip install --no-cache-dir --force-reinstall "protobuf==3.
 # Non-root user + pre-owned volume paths
 # ---------------------------------------------------------------------------
 
-RUN useradd --uid 1000 --create-home --shell /bin/bash parrot \
+# Some Ubuntu ARM base images already ship a UID 1000 user. Reuse that UID
+# instead of failing the image build on a duplicate-ID error.
+RUN if ! getent passwd 1000 >/dev/null; then \
+        useradd --uid 1000 --create-home --shell /bin/bash parrot; \
+    fi \
     && mkdir -p /recordings /var/log/parrot-forwarder /etc/parrot-forwarder \
-    && chown -R parrot:parrot /opt/pf /recordings /var/log/parrot-forwarder /etc/parrot-forwarder \
+    && chown -R 1000:1000 /opt/pf /recordings /var/log/parrot-forwarder /etc/parrot-forwarder \
     && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER parrot
+USER 1000:1000
 
 EXPOSE 8080 8890 12345/udp
 

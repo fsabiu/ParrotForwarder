@@ -7,7 +7,7 @@ skip to [Quick diagnostic flow](#quick-diagnostic-flow).
 ## Target host
 
 - Ubuntu 24.04 LTS ARM64.
-- User `pf` with sudo (or `oracle` on legacy hosts).
+- Any sudo-capable account used to install and operate the service.
 - Parrot Anafi + Skycontroller 3.
 - Control path can be either:
   - direct USB/RNDIS from the Linux host to the controller/drone (`192.168.53.1`), or
@@ -48,8 +48,8 @@ Logs are rotating JSON at the path in `config.yaml` (`/var/log/parrot-forwarder/
 
 ## Run in Docker
 
-This is the preferred path when you want the service reachable on the machine's
-own IP instead of a host-local tunnel or VM port-forward.
+This is the preferred path when you want the service reachable directly on the
+machine's LAN IP instead of a host-local tunnel or VM port-forward.
 
 ```bash
 cd ParrotForwarder
@@ -61,7 +61,45 @@ Compose uses:
 - `network_mode: host` so SRT and the dashboard bind directly on the Linux host.
 - `PARROT_FORWARDER_SUPERVISOR__HTTP__BIND=0.0.0.0` so the dashboard is reachable at `http://<machine-ip>:8080/`.
 - `/dev/bus/usb` passthrough for the Skycontroller 3.
+- `./recordings:/recordings` so recordings are written to the host at `ParrotForwarder/recordings/`.
 - `restart: unless-stopped` so the container survives reboots and crashes.
+
+Recording files:
+- On the host, find them under `ParrotForwarder/recordings/`.
+- Inside the container, the same directory is `/recordings`.
+- Active and finalized recordings are organized by date, typically `recordings/YYYY-MM-DD/default/<file>.ts`.
+- Deleted recordings are moved under `recordings/.trash/<recording-id>/`.
+
+Startup behavior:
+- After the first successful `docker compose up -d`, the container will restart automatically after a guest reboot because the service uses `restart: unless-stopped`.
+- This depends on the Docker daemon starting on boot. Verify or enable it with `sudo systemctl enable --now docker`.
+- If you remove the container with `docker compose down`, there is nothing left for Docker to restart on the next boot. Run `docker compose up -d` again after that.
+
+Finding the dashboard address:
+
+```bash
+hostname -I
+ip -brief addr
+```
+
+Use the guest's LAN address in the browser:
+
+```text
+http://<machine-ip>:8080/
+```
+
+The IP usually stays the same only as long as your DHCP lease and network
+topology stay the same. If you need a stable URL across reboots, create a DHCP
+reservation on the router or configure a static IP in the guest.
+
+### Virtualized hosts
+
+For a VM deployment, keep the instructions generic:
+
+- Use a bridged network adapter if operators should reach the dashboard directly from the LAN.
+- Enable USB passthrough for the Skycontroller before starting the container.
+- On VirtualBox specifically, enable the USB controller for the guest and attach the Skycontroller device to the VM; exact host adapter names and local usernames are machine-specific and should not be committed.
+- After boot, verify the guest sees the controller with `lsusb` and verify the dashboard with `curl http://<machine-ip>:8080/health`.
 
 If you want a host-managed config instead of the image default, uncomment the
 config bind mount in `docker-compose.yml`.
@@ -107,11 +145,8 @@ sudo systemctl restart parrot_forwarder
 ## Dashboard
 
 Bare metal / systemd default: the dashboard is localhost-only
-(`supervisor.http.bind: 127.0.0.1` in `config.yaml`), so use:
-
-```bash
-ssh -L 8080:localhost:8080 pf@host
-```
+(`supervisor.http.bind: 127.0.0.1` in `config.yaml`), so expose it deliberately
+before opening it to a LAN.
 
 Docker compose default: browse directly to `http://<machine-ip>:8080/` on the
 same trusted LAN/VPN because compose overrides the bind address to `0.0.0.0`.

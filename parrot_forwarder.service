@@ -6,10 +6,11 @@ Requires=network.target
 
 [Service]
 Type=simple
-User=oracle
-Group=oracle
-WorkingDirectory=/home/oracle/ParrotForwarder
-ExecStart=/home/oracle/ParrotForwarder/.venv/bin/parrot-forwarder-supervisor --config /etc/parrot-forwarder/config.yaml
+# Adjust these three lines for the target machine before enabling the unit.
+User=parrot
+Group=parrot
+WorkingDirectory=/opt/parrot-forwarder
+ExecStart=/opt/parrot-forwarder/.venv/bin/parrot-forwarder-supervisor --config /etc/parrot-forwarder/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
@@ -18,9 +19,9 @@ StandardError=journal
 SyslogIdentifier=parrot_forwarder
 
 # Environment variables
-Environment=PYTHONPATH=/home/oracle/ParrotForwarder
+Environment=PYTHONPATH=/opt/parrot-forwarder
 Environment=PYTHONUNBUFFERED=1
-Environment=PATH=/home/oracle/ParrotForwarder/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/opt/parrot-forwarder/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Security settings (relaxed for conda environment access)
 NoNewPrivileges=true
