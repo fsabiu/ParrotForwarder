@@ -4,8 +4,10 @@
 const state = {
   startedAt: null,
   lastTelemetryAt: null,
+  lastLiveSignalAt: null,
   serviceState: "DISCONNECTED",
   previewAvailable: false,
+  previewSuppressed: false,
   telemetryStale: true,
 };
 
@@ -174,8 +176,10 @@ function clearTelemetry() {
 }
 
 function markTelemetryStale() {
-  if (state.telemetryStale) return;
+  if (state.telemetryStale && state.previewSuppressed) return;
   state.telemetryStale = true;
+  state.previewSuppressed = true;
+  state.lastLiveSignalAt = null;
   clearTelemetry();
   previewController?.stop();
   state.previewAvailable = false;
@@ -192,8 +196,14 @@ function setState(name) {
   if (name === "STREAMING" && !state.startedAt) {
     state.startedAt = Date.now();
   }
+  if (isPreviewActive && !wasPreviewActive) {
+    state.lastLiveSignalAt = Date.now();
+    state.previewSuppressed = false;
+  }
   if (!isPreviewActive) {
     state.startedAt = null;
+    state.lastLiveSignalAt = null;
+    state.previewSuppressed = false;
     setField("uptime", "-");
   }
   if (!["STREAMING", "DEGRADED", "READY"].includes(name)) {
@@ -205,7 +215,11 @@ function setState(name) {
       previewController.start();
     } else if (!isPreviewActive && wasPreviewActive) {
       previewController.stop();
-    } else if (isPreviewActive && !el("preview")?.getAttribute("src")) {
+    } else if (
+      isPreviewActive &&
+      !state.previewSuppressed &&
+      !el("preview")?.getAttribute("src")
+    ) {
       previewController.start();
     }
   }
@@ -417,12 +431,20 @@ function tickTimers() {
     const s = seconds % 60;
     setField("uptime", `${h}h${m}m${s}s`);
   }
-  if (state.lastTelemetryAt) {
-    const ageMs = Date.now() - state.lastTelemetryAt;
+  const liveReferenceAt =
+    state.lastTelemetryAt ??
+    (previewStateActive(state.serviceState) ? state.lastLiveSignalAt : null);
+
+  if (liveReferenceAt) {
+    const ageMs = Date.now() - liveReferenceAt;
     if (ageMs > TELEMETRY_STALE_AFTER_MS) {
       markTelemetryStale();
       return;
     }
+  }
+
+  if (state.lastTelemetryAt) {
+    const ageMs = Date.now() - state.lastTelemetryAt;
     const seconds = Math.floor(ageMs / 1000);
     setField("last-telemetry", `${seconds}s ago`);
   }
@@ -519,17 +541,17 @@ function renderTelemetry(payload, sampleTime) {
   const system = payload.system || {};
   const storage = payload.storage || {};
   const showPosition = hasDisplayablePosition(payload, position);
-
-  if (!showPosition) {
-    state.telemetryStale = true;
-    clearTelemetry();
-    return;
-  }
-
   const displayPayload = sanitizedTelemetryForDisplay(payload);
 
   state.lastTelemetryAt = Date.now();
+  state.lastLiveSignalAt = state.lastTelemetryAt;
   state.telemetryStale = false;
+  if (state.previewSuppressed) {
+    state.previewSuppressed = false;
+    if (previewStateActive(state.serviceState) && !el("preview")?.getAttribute("src")) {
+      previewController?.start();
+    }
+  }
   setField("battery", isNumber(payload.battery_percent) ? `${payload.battery_percent}%` : "-");
   setField("gps", fmtBool(payload.gps_fix));
   setField("position-valid", fmtBool(payload.position_valid));
@@ -540,13 +562,19 @@ function renderTelemetry(payload, sampleTime) {
   // don't overwrite with the raw ISO timestamp here (caused a 1 Hz flicker
   // between the timestamp and "0s ago").
 
-  setField("position-source", position.source || "-");
-  setField("position-message", position.message || "-");
-  setField("position-coords", fmtCoords(position.latitude, position.longitude, 4));
-  setField("position-altitudes", fmtAltitudes(position));
-  setField("position-accuracy", fmtAccuracy(position));
-  setField("home-coords", fmtCoords(position.home?.latitude, position.home?.longitude, 4));
-  setField("klv-coords", fmtKlvCoords(position));
+  setField("position-source", showPosition ? position.source || "-" : "-");
+  setField("position-message", showPosition ? position.message || "-" : "-");
+  setField(
+    "position-coords",
+    showPosition ? fmtCoords(position.latitude, position.longitude, 4) : "-"
+  );
+  setField("position-altitudes", showPosition ? fmtAltitudes(position) : "-");
+  setField("position-accuracy", showPosition ? fmtAccuracy(position) : "-");
+  setField(
+    "home-coords",
+    showPosition ? fmtCoords(position.home?.latitude, position.home?.longitude, 4) : "-"
+  );
+  setField("klv-coords", showPosition ? fmtKlvCoords(position) : "-");
 
   setField("gimbal-abs", fmtAxisTriplet(gimbal.absolute_deg, 2));
   setField("gimbal-rel", fmtAxisTriplet(gimbal.relative_deg, 2));
@@ -612,8 +640,12 @@ function connectTelemetryStream() {
   ws.addEventListener("close", () => {
     appendLog("[info] telemetry stream closed; reconnecting in 1 s");
     state.telemetryStale = true;
+    state.previewSuppressed = true;
+    state.lastLiveSignalAt = null;
     clearTelemetry();
     previewController?.stop();
+    state.previewAvailable = false;
+    syncPreviewState();
     setTimeout(connectTelemetryStream, STREAM_RECONNECT_DELAY_MS);
   });
 }

@@ -82,7 +82,9 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "ResizeObserver" in response.text
     assert "syncTelemetryJsonHeight" in response.text
     assert 'setField("telemetry-json", "")' in response.text
-    assert "if (!showPosition) {" in response.text
+    assert "lastLiveSignalAt: null" in response.text
+    assert "previewSuppressed: false" in response.text
+    assert "state.previewSuppressed = true;" in response.text
     assert '"READY"' in response.text
     assert '["READY", "STREAMING", "DEGRADED"]' in response.text
     assert "setInterval(refreshStatus, STATUS_REFRESH_INTERVAL_MS)" in response.text
