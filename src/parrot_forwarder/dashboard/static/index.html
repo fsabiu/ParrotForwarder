@@ -73,6 +73,19 @@
       </dl>
     </section>
 
+    <section class="panel telemetry-compact">
+      <h2>Telemetry</h2>
+      <dl class="compact-dl">
+        <dt>Battery</dt><dd id="battery">-</dd>
+        <dt>GPS fix</dt><dd id="gps">-</dd>
+        <dt>Satellites</dt><dd id="satellites">-</dd>
+        <dt>RSSI</dt><dd id="rssi">-</dd>
+        <dt>FPS</dt><dd id="fps">-</dd>
+        <dt>Position valid</dt><dd id="position-valid">-</dd>
+        <dt>Flight state</dt><dd id="flying-state">-</dd>
+      </dl>
+    </section>
+
     <section class="panel preview">
       <h2>Video Preview</h2>
       <div id="preview-frame" class="preview-frame">
@@ -87,17 +100,9 @@
       <p class="hint">MJPEG live preview from the drone (downscaled, ~250 ms latency). Main full-rate stream: <code>srt://&lt;host&gt;:8890</code>.</p>
     </section>
 
-    <section class="panel telemetry-compact">
-      <h2>Telemetry</h2>
-      <dl class="compact-dl">
-        <dt>Battery</dt><dd id="battery">-</dd>
-        <dt>GPS fix</dt><dd id="gps">-</dd>
-        <dt>Satellites</dt><dd id="satellites">-</dd>
-        <dt>RSSI</dt><dd id="rssi">-</dd>
-        <dt>FPS</dt><dd id="fps">-</dd>
-        <dt>Position valid</dt><dd id="position-valid">-</dd>
-        <dt>Flight state</dt><dd id="flying-state">-</dd>
-      </dl>
+    <section class="panel raw">
+      <h2>Telemetry JSON</h2>
+      <pre id="telemetry-json">{}</pre>
     </section>
 
     <section class="panel recording">
@@ -143,11 +148,6 @@
           </tbody>
         </table>
       </div>
-    </section>
-
-    <section class="panel raw">
-      <h2>Telemetry JSON</h2>
-      <pre id="telemetry-json">{}</pre>
     </section>
 
     <section class="panel log">
