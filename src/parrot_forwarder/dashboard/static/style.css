@@ -248,6 +248,7 @@ main {
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 10px;
+  min-width: 0;
   min-height: 0;
   background: linear-gradient(180deg, var(--panel), var(--panel-alt));
   box-shadow: var(--panel-shadow);
@@ -368,10 +369,14 @@ dd {
   margin: 0.5rem 0 0;
   color: var(--muted);
   font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .hint code {
   color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .telemetry-compact .compact-dl {
@@ -533,6 +538,9 @@ dd {
 
 .rec-list-wrap {
   margin-top: 1rem;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .rec-list-header {
