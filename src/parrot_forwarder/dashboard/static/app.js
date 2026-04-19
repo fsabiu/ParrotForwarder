@@ -8,6 +8,11 @@ const state = {
   previewAvailable: false,
 };
 
+const DASHBOARD_THEME_KEY = "parrotForwarder.theme";
+const DASHBOARD_THEMES = new Set(["dark", "light", "sun"]);
+const STREAM_RECONNECT_DELAY_MS = 1000;
+const STATUS_REFRESH_INTERVAL_MS = 1000;
+
 let previewController = null;
 
 const TELEMETRY_FIELDS = [
@@ -47,6 +52,48 @@ const TELEMETRY_FIELDS = [
 ];
 
 const el = (id) => document.getElementById(id);
+
+function storageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (err) {
+    return null;
+  }
+}
+
+function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    // Ignore storage failures (private mode / policy lock-down).
+  }
+}
+
+function updateThemeButtons(theme) {
+  document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+    const active = button.dataset.themeChoice === theme;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function applyTheme(theme) {
+  const nextTheme = DASHBOARD_THEMES.has(theme) ? theme : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+  document.documentElement.style.colorScheme = nextTheme === "dark" ? "dark" : "light";
+  updateThemeButtons(nextTheme);
+  storageSet(DASHBOARD_THEME_KEY, nextTheme);
+}
+
+function restoreTheme() {
+  applyTheme(storageGet(DASHBOARD_THEME_KEY) || "dark");
+}
+
+function wireThemeToggle() {
+  document.querySelectorAll("[data-theme-choice]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme(button.dataset.themeChoice));
+  });
+}
 
 function setField(id, value = "-") {
   const node = el(id);
@@ -357,8 +404,8 @@ function connectEventStream() {
     }
   });
   ws.addEventListener("close", () => {
-    appendLog("[info] event stream closed; reconnecting in 2 s");
-    setTimeout(connectEventStream, 2000);
+    appendLog("[info] event stream closed; reconnecting in 1 s");
+    setTimeout(connectEventStream, STREAM_RECONNECT_DELAY_MS);
   });
 }
 
@@ -450,9 +497,9 @@ function connectTelemetryStream() {
     }
   });
   ws.addEventListener("close", () => {
-    appendLog("[info] telemetry stream closed; reconnecting in 2 s");
+    appendLog("[info] telemetry stream closed; reconnecting in 1 s");
     clearTelemetry();
-    setTimeout(connectTelemetryStream, 2000);
+    setTimeout(connectTelemetryStream, STREAM_RECONNECT_DELAY_MS);
   });
 }
 
@@ -533,10 +580,10 @@ function restoreRecInputs() {
   for (const [id, key] of Object.entries(REC_INPUT_KEYS)) {
     const node = el(id);
     if (!node) continue;
-    const stored = localStorage.getItem(key);
+    const stored = storageGet(key);
     if (stored != null) node.value = stored;
     node.addEventListener("change", () => {
-      localStorage.setItem(key, node.value);
+      storageSet(key, node.value);
     });
   }
 }
@@ -744,6 +791,8 @@ el("btn-rec-refresh")?.addEventListener("click", () => {
   refreshRecDisk();
 });
 
+restoreTheme();
+wireThemeToggle();
 restoreRecInputs();
 
 clearTelemetry();
@@ -755,6 +804,6 @@ refreshRecStatus();
 refreshRecList();
 refreshRecDisk();
 setInterval(tickTimers, 1000);
-setInterval(refreshStatus, 5000);
+setInterval(refreshStatus, STATUS_REFRESH_INTERVAL_MS);
 setInterval(refreshRecStatus, 2000);
 setInterval(refreshRecDisk, 15000);

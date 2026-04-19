@@ -60,9 +60,17 @@ docker compose ps
 Compose uses:
 - `network_mode: host` so SRT and the dashboard bind directly on the Linux host.
 - `PARROT_FORWARDER_SUPERVISOR__HTTP__BIND=0.0.0.0` so the dashboard is reachable at `http://<machine-ip>:8080/`.
+- `PARROT_FORWARDER_SUPERVISOR__BACKOFF__BASE_SECONDS=1`, `MAX_SECONDS=1`, and `JITTER_SECONDS=0` so a power-cycled drone is retried every second instead of backing off for longer intervals.
 - `/dev/bus/usb` passthrough for the Skycontroller 3.
 - `./recordings:/recordings` so recordings are written to the host at `ParrotForwarder/recordings/`.
 - `restart: unless-stopped` so the container survives reboots and crashes.
+
+LAN endpoints:
+- Dashboard: `http://<machine-ip>:8080/`
+- SRT output: `srt://<machine-ip>:8890`
+- Because Docker uses host networking here, there is no separate `ports:` section; services bind directly on the Linux machine running Docker.
+- Example hostname form: `http://parrot-forwarder-vm:8080/`
+- If you publish the dashboard behind port 80 with DNS or a reverse proxy, the same host can also appear as `http://parrot-forwarder-vm/`.
 
 Recording files:
 - On the Linux machine running Docker, find them under `ParrotForwarder/recordings/`.
@@ -99,8 +107,10 @@ For a VM deployment, keep the instructions generic:
 
 - Use a bridged network adapter if operators should reach the dashboard directly from the LAN.
 - Enable USB passthrough for the Skycontroller before starting the container.
+- The guest's LAN IP carries both the dashboard on `8080/tcp` and the SRT stream on `8890/udp`.
 - On VirtualBox specifically, enable the USB controller for the guest and attach the Skycontroller device to the VM; exact host adapter names and local usernames are machine-specific and should not be committed.
 - After boot, verify the guest sees the controller with `lsusb` and verify the dashboard with `curl http://<machine-ip>:8080/health`.
+- If the guest firewall is enabled, allow `8080/tcp` and `8890/udp` before testing from other hosts.
 
 If you want a host-managed config instead of the image default, uncomment the
 config bind mount in `docker-compose.yml`.
@@ -152,6 +162,15 @@ before opening it to a LAN.
 Docker compose default: browse directly to `http://<machine-ip>:8080/` on the
 same trusted LAN/VPN because compose overrides the bind address to `0.0.0.0`.
 
+Docker compose also exposes the transport stream on `srt://<machine-ip>:8890`
+to the same LAN/VPN because the SRT listener is bound on the Linux host
+network namespace.
+
+Examples:
+- Direct IP: `http://192.168.1.134:8080/`
+- Hostname alias: `http://parrot-forwarder-vm:8080/`
+- Bare hostname only: `http://parrot-forwarder-vm/` if you front the dashboard with port 80.
+
 ## Quick diagnostic flow
 
 ```bash
@@ -178,6 +197,9 @@ gst-inspect-1.0 mpegtsmux srtsink | head
 
 # 6. Is the SRT output listening?
 sudo ss -lpn | grep 8890
+
+# 7. Can another host read it?
+ffplay -fflags nobuffer -flags low_delay 'srt://<machine-ip>:8890'
 ```
 
 ## Common faults
@@ -188,7 +210,7 @@ sudo ss -lpn | grep 8890
 | `state: READY`, telemetry present, no preview | control link is up but RTSP not live yet | check drone/camera state; if using controller-over-LAN, verify the controller actually exposes Parrot ports on its LAN IP |
 | `POST /control/start` returns 409 | worker backend disabled on this host | use Linux + Olympe + GStreamer, or run the Docker compose deployment on the target machine |
 | `state: DEGRADED`, signal=fps | video pipeline stalled | restart via `POST /control/reset`; if persists, `sudo journalctl -u parrot_forwarder \| grep pipeline.error` |
-| `state: STREAMING` but no video at client | network / firewall | `ufw allow 8890`; verify SRT locally: `ffplay srt://localhost:8890` |
+| `state: STREAMING` but no video at client | network / firewall | `ufw allow 8890`; verify SRT locally: `ffplay -fflags nobuffer -flags low_delay 'srt://localhost:8890'` |
 | controller LAN IP pings but ports `180/554/44444-44447` are refused | incompatible USB-Ethernet adapter / dock path | replace the adapter chain; keep the Mac out of the USB path and use a known-good controller Ethernet path |
 | Dashboard blank / 404 | wrong port | confirm `supervisor.http.port` in `config.yaml` and `ss -lpn \| grep 8080` |
 | `protobuf 4.x` error | env corruption | re-run `./scripts/install.sh` - it force-reinstalls `protobuf==3.20.3` |

@@ -13,6 +13,9 @@ services:
     environment:
       PARROT_FORWARDER_SUPERVISOR__HTTP__BIND: 0.0.0.0
       PARROT_FORWARDER_SUPERVISOR__AUTO_START: "true"
+      PARROT_FORWARDER_SUPERVISOR__BACKOFF__BASE_SECONDS: "1.0"
+      PARROT_FORWARDER_SUPERVISOR__BACKOFF__MAX_SECONDS: "1.0"
+      PARROT_FORWARDER_SUPERVISOR__BACKOFF__JITTER_SECONDS: "0.0"
     volumes:
       - ./var/log/parrot-forwarder:/var/log/parrot-forwarder
       - ./config:/etc/parrot-forwarder

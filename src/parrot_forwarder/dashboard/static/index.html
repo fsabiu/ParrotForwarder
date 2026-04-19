@@ -10,6 +10,35 @@
   <header>
     <h1>ParrotForwarder</h1>
     <div class="header-actions">
+      <div class="theme-toggle" role="group" aria-label="Theme mode">
+        <button
+          id="theme-dark"
+          class="theme-button is-active"
+          data-theme-choice="dark"
+          type="button"
+          aria-pressed="true"
+        >
+          Dark
+        </button>
+        <button
+          id="theme-light"
+          class="theme-button"
+          data-theme-choice="light"
+          type="button"
+          aria-pressed="false"
+        >
+          Light
+        </button>
+        <button
+          id="theme-sun"
+          class="theme-button"
+          data-theme-choice="sun"
+          type="button"
+          aria-pressed="false"
+        >
+          Sun
+        </button>
+      </div>
       <button id="btn-restart" class="header-button" type="button">Restart</button>
       <span id="state-badge" class="state state-disconnected">DISCONNECTED</span>
     </div>

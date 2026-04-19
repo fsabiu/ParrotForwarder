@@ -43,7 +43,14 @@ ParrotForwarder is a professional-grade UAS streaming system that synchronizes v
 For v2 operations, run `parrot-forwarder-supervisor` on the host or
 `docker compose up -d --build` on the target machine. The containerized path
 uses host networking and can expose the dashboard on `http://<machine-ip>:8080/`
-while the default bare-metal config keeps it on `http://localhost:8080/`.
+and the SRT stream on `srt://<machine-ip>:8890`, while the default bare-metal
+config keeps the dashboard on `http://localhost:8080/`.
+
+Common LAN examples:
+- Dashboard by IP: `http://192.168.1.134:8080/`
+- Dashboard by hostname: `http://parrot-forwarder-vm:8080/`
+- Dashboard behind port 80: `http://parrot-forwarder-vm/`
+- SRT readout: `ffplay -fflags nobuffer -flags low_delay 'srt://parrot-forwarder-vm:8890'`
 
 ### Use Cases
 
@@ -523,13 +530,13 @@ Options:
 #### Using ffplay (FFmpeg)
 ```bash
 # Basic playback with low latency
-ffplay -fflags nobuffer -flags low_delay srt://<your-linux-host-ip>:8890
+ffplay -fflags nobuffer -flags low_delay 'srt://<your-linux-host-ip>:8890'
 
-# View video only (example with VPN IP)
-ffplay -fflags nobuffer -flags low_delay srt://100.105.188.84:8890
+# Hostname example
+ffplay -fflags nobuffer -flags low_delay 'srt://parrot-forwarder-vm:8890'
 
 # View stream info (shows both video and KLV data streams)
-ffprobe srt://<your-linux-host-ip>:8890
+ffprobe 'srt://<your-linux-host-ip>:8890'
 ```
 
 #### Recording the Stream
