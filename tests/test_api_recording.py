@@ -132,7 +132,10 @@ def test_post_start_then_stop(app_and_root) -> None:
 def test_list_and_metadata_and_download(app_and_root) -> None:
     app, root, _recorder, _index = app_and_root
     with TestClient(app) as client:
-        r = client.post("/recording/start", json={"mission_id": "alpha"})
+        r = client.post(
+            "/recording/start",
+            json={"mission_id": "alpha", "drone_id": "drone-01", "notes": "field test"},
+        )
         rid = r.json()["recording_id"]
         import time
 
@@ -158,6 +161,10 @@ def test_list_and_metadata_and_download(app_and_root) -> None:
         r = client.get(f"/recording/{rid}/download")
         assert r.status_code == 200
         assert r.headers["content-type"] == "video/mp2t"
+        assert (
+            'filename="alpha_drone-01_'
+            in r.headers["content-disposition"]
+        )
         assert len(r.content) > 0
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status as http_status
@@ -174,7 +175,7 @@ def create_recording_router(
         return FileResponse(
             path,
             media_type="video/mp2t",
-            filename=path.name,
+            filename=_download_filename(row, path),
             headers={"Cache-Control": "no-store"},
         )
 
@@ -204,3 +205,35 @@ def create_recording_router(
         return {"recording_id": recording_id, "path": str(new_path), "state": "deleted"}
 
     return router
+
+
+def _download_filename(row: RecordingRow, path: Path) -> str:
+    mission = _safe_segment(row.mission_id) if row.mission_id else None
+    drone = _safe_segment(row.drone_id) if row.drone_id else None
+    session = _safe_segment(row.session_id) if row.session_id else None
+    started = _started_at_compact(row.started_at)
+
+    parts = [part for part in (mission, drone, session, started) if part]
+    if not parts:
+        return path.name
+    return "_".join(parts) + path.suffix
+
+
+def _safe_segment(raw: str) -> str:
+    chars: list[str] = []
+    for ch in raw:
+        if ch.isalnum() or ch in "-_.":
+            chars.append(ch)
+        else:
+            chars.append("_")
+    return "".join(chars).strip("_") or "unknown"
+
+
+def _started_at_compact(started_at: str | None) -> str | None:
+    if not started_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt.strftime("%Y-%m-%dT%H-%M-%SZ")

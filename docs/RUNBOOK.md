@@ -65,10 +65,11 @@ Compose uses:
 - `restart: unless-stopped` so the container survives reboots and crashes.
 
 Recording files:
-- On the host, find them under `ParrotForwarder/recordings/`.
+- On the Linux machine running Docker, find them under `ParrotForwarder/recordings/`.
 - Inside the container, the same directory is `/recordings`.
 - Active and finalized recordings are organized by date, typically `recordings/YYYY-MM-DD/default/<file>.ts`.
 - Deleted recordings are moved under `recordings/.trash/<recording-id>/`.
+- If Docker is running inside a VM, this path is inside the guest by default. It does not appear automatically on the macOS host unless you also configure a VM shared folder or another host/guest file-sharing mechanism.
 
 Startup behavior:
 - After the first successful `docker compose up -d`, the container will restart automatically after a guest reboot because the service uses `restart: unless-stopped`.
