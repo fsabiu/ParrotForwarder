@@ -59,6 +59,7 @@ docker compose ps
 
 Compose uses:
 - `network_mode: host` so SRT and the dashboard bind directly on the Linux host.
+- `build.network: host` so `docker compose up -d --build` reuses the Linux host resolver during image builds. This avoids bridge-network DNS failures on guests that use VPN-managed resolvers such as Tailscale MagicDNS.
 - `PARROT_FORWARDER_SUPERVISOR__HTTP__BIND=0.0.0.0` so the dashboard is reachable at `http://<machine-ip>:8080/`.
 - `PARROT_FORWARDER_SUPERVISOR__BACKOFF__BASE_SECONDS=1`, `MAX_SECONDS=1`, and `JITTER_SECONDS=0` so a power-cycled drone is retried every second instead of backing off for longer intervals.
 - `/dev/bus/usb` passthrough for the Skycontroller 3.

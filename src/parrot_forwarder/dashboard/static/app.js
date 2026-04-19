@@ -106,12 +106,10 @@ function setField(id, value = "-") {
 
 function syncTelemetryJsonHeight() {
   const rawPanel = document.querySelector(".raw");
-  const previewPanel = document.querySelector(".preview");
+  const previewFrame = document.querySelector(".preview-frame");
   const pre = el("telemetry-json");
-  const title = rawPanel?.querySelector("h2");
-  if (!rawPanel || !previewPanel || !pre) return;
+  if (!rawPanel || !previewFrame || !pre) return;
 
-  rawPanel.style.removeProperty("height");
   pre.style.removeProperty("height");
   pre.style.removeProperty("max-height");
 
@@ -119,30 +117,19 @@ function syncTelemetryJsonHeight() {
     return;
   }
 
-  const panelStyles = window.getComputedStyle(rawPanel);
-  const titleStyles = title ? window.getComputedStyle(title) : null;
-  const verticalPadding =
-    parseFloat(panelStyles.paddingTop || "0") + parseFloat(panelStyles.paddingBottom || "0");
-  const titleHeight = title ? title.getBoundingClientRect().height : 0;
-  const titleMarginBottom = titleStyles ? parseFloat(titleStyles.marginBottom || "0") : 0;
-  const targetPanelHeight = previewPanel.getBoundingClientRect().height;
-  const targetPreHeight = Math.max(
-    240,
-    Math.floor(targetPanelHeight - verticalPadding - titleHeight - titleMarginBottom)
-  );
+  const targetPreHeight = Math.max(240, Math.floor(previewFrame.getBoundingClientRect().height));
 
-  rawPanel.style.height = `${Math.floor(targetPanelHeight)}px`;
   pre.style.height = `${targetPreHeight}px`;
   pre.style.maxHeight = `${targetPreHeight}px`;
 }
 
 function wireTelemetryJsonHeight() {
-  const previewPanel = document.querySelector(".preview");
-  if (!previewPanel) return;
+  const previewFrame = document.querySelector(".preview-frame");
+  if (!previewFrame) return;
   syncTelemetryJsonHeight();
   telemetryLayoutObserver?.disconnect();
   telemetryLayoutObserver = new ResizeObserver(() => syncTelemetryJsonHeight());
-  telemetryLayoutObserver.observe(previewPanel);
+  telemetryLayoutObserver.observe(previewFrame);
   window.addEventListener("resize", syncTelemetryJsonHeight);
 }
 

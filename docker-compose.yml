@@ -2,6 +2,7 @@ services:
   parrot-forwarder:
     build:
       context: .
+      network: host
     image: parrot-forwarder:v2
     container_name: parrot-forwarder
     init: true
