@@ -345,6 +345,57 @@ function fmtHoveringWarning(flight = {}) {
   return parts.length ? parts.join(" | ") : "none";
 }
 
+function hasDisplayablePosition(payload, position = {}) {
+  if (payload.position_valid !== true) return false;
+  if (position.valid === false) return false;
+  return position.source !== "default" && position.is_default !== true;
+}
+
+function sanitizedTelemetryForDisplay(payload) {
+  const clone = JSON.parse(JSON.stringify(payload));
+  const position = clone.position || {};
+  if (!hasDisplayablePosition(clone, position)) {
+    delete clone.position;
+    if (clone.raw && typeof clone.raw === "object") {
+      for (const key of [
+        "altitude",
+        "altitude_agl",
+        "altitude_relative_takeoff_m",
+        "altitude_takeoff_m",
+        "gps_location_altitude_msl_raw",
+        "gps_location_latitude_raw",
+        "gps_location_longitude_raw",
+        "ground_altitude_msl",
+        "home_altitude_msl",
+        "home_latitude",
+        "home_longitude",
+        "latitude",
+        "longitude",
+        "platform_altitude_msl",
+        "position_altitude_accuracy_m",
+        "position_altitude_msl",
+        "position_changed_altitude_msl_raw",
+        "position_changed_latitude_raw",
+        "position_changed_longitude_raw",
+        "position_is_default",
+        "position_latitude",
+        "position_latitude_accuracy_m",
+        "position_longitude",
+        "position_longitude_accuracy_m",
+        "position_message",
+        "position_source",
+        "position_valid",
+      ]) {
+        delete clone.raw[key];
+      }
+      if (Object.keys(clone.raw).length === 0) {
+        delete clone.raw;
+      }
+    }
+  }
+  return clone;
+}
+
 async function refreshStatus() {
   try {
     const response = await fetch("/status", { cache: "no-store" });
@@ -467,6 +518,8 @@ function renderTelemetry(payload, sampleTime) {
   const flight = payload.flight || {};
   const system = payload.system || {};
   const storage = payload.storage || {};
+  const showPosition = hasDisplayablePosition(payload, position);
+  const displayPayload = sanitizedTelemetryForDisplay(payload);
 
   state.lastTelemetryAt = Date.now();
   state.telemetryStale = false;
@@ -480,13 +533,19 @@ function renderTelemetry(payload, sampleTime) {
   // don't overwrite with the raw ISO timestamp here (caused a 1 Hz flicker
   // between the timestamp and "0s ago").
 
-  setField("position-source", position.source || "-");
-  setField("position-message", position.message || "-");
-  setField("position-coords", fmtCoords(position.latitude, position.longitude, 4));
-  setField("position-altitudes", fmtAltitudes(position));
-  setField("position-accuracy", fmtAccuracy(position));
-  setField("home-coords", fmtCoords(position.home?.latitude, position.home?.longitude, 4));
-  setField("klv-coords", fmtKlvCoords(position));
+  setField("position-source", showPosition ? position.source || "-" : "-");
+  setField("position-message", showPosition ? position.message || "-" : "-");
+  setField(
+    "position-coords",
+    showPosition ? fmtCoords(position.latitude, position.longitude, 4) : "-"
+  );
+  setField("position-altitudes", showPosition ? fmtAltitudes(position) : "-");
+  setField("position-accuracy", showPosition ? fmtAccuracy(position) : "-");
+  setField(
+    "home-coords",
+    showPosition ? fmtCoords(position.home?.latitude, position.home?.longitude, 4) : "-"
+  );
+  setField("klv-coords", showPosition ? fmtKlvCoords(position) : "-");
 
   setField("gimbal-abs", fmtAxisTriplet(gimbal.absolute_deg, 2));
   setField("gimbal-rel", fmtAxisTriplet(gimbal.relative_deg, 2));
@@ -533,7 +592,7 @@ function renderTelemetry(payload, sampleTime) {
   setField("product-info", fmtProductInfo(system));
   setField("flight-hours", fmtMotorFlights(system));
   setField("storage-info", fmtStorage(storage));
-  setField("telemetry-json", JSON.stringify(payload, null, 2));
+  setField("telemetry-json", JSON.stringify(displayPayload, null, 2));
   syncTelemetryJsonHeight();
 }
 
