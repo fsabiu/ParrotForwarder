@@ -211,9 +211,10 @@ def _download_filename(row: RecordingRow, path: Path) -> str:
     mission = _safe_segment(row.mission_id) if row.mission_id else None
     drone = _safe_segment(row.drone_id) if row.drone_id else None
     session = _safe_segment(row.session_id) if row.session_id else None
+    notes = _safe_segment(row.notes) if row.notes else None
     started = _started_at_compact(row.started_at)
 
-    parts = [part for part in (mission, drone, session, started) if part]
+    parts = [part for part in (mission, drone, session, notes, started) if part]
     if not parts:
         return path.name
     return "_".join(parts) + path.suffix

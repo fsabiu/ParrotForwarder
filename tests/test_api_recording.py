@@ -162,7 +162,7 @@ def test_list_and_metadata_and_download(app_and_root) -> None:
         assert r.status_code == 200
         assert r.headers["content-type"] == "video/mp2t"
         assert (
-            'filename="alpha_drone-01_'
+            'filename="alpha_drone-01_field_test_'
             in r.headers["content-disposition"]
         )
         assert len(r.content) > 0
