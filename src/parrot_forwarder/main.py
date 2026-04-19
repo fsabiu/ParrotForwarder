@@ -223,16 +223,20 @@ class ParrotForwarder:
             return False
         
         try:
-            # Check connection state using Olympe's internal state
-            # The drone object has a _connected attribute
-            if hasattr(self.drone, '_connected') and not self.drone._connected:
-                return False
+            connection_state = getattr(self.drone, "connection_state", None)
+            if callable(connection_state):
+                return bool(connection_state())
+
+            # Fallback for older/partial mock implementations that expose the
+            # connection only through a private flag.
+            if hasattr(self.drone, '_connected'):
+                return bool(self.drone._connected)
             
-            # Try to get telemetry to verify the connection is alive
+            # Last-resort probe when the runtime does not expose a dedicated
+            # connection-state API.
             from olympe.messages.common.CommonState import BatteryStateChanged
             battery = self.drone.get_state(BatteryStateChanged)
             
-            # If we can get state, connection is alive
             return battery is not None
             
         except Exception as e:

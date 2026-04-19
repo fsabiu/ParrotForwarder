@@ -121,6 +121,12 @@ dd {
   height: 100%;
   background: #000;
   object-fit: contain;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.preview-frame.has-video img {
+  opacity: 1;
 }
 
 .preview-overlay {
@@ -142,6 +148,38 @@ dd {
 .preview-frame.has-video .preview-overlay {
   opacity: 0;
   pointer-events: none;
+}
+
+.preview-fullscreen {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 2;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(115, 210, 246, 0.35);
+  border-radius: 999px;
+  background: rgba(8, 12, 16, 0.75);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.preview-fullscreen:hover {
+  background: rgba(18, 27, 35, 0.9);
+}
+
+.preview-frame:fullscreen {
+  border-radius: 0;
+  border-color: transparent;
+  background: #000;
+}
+
+.preview-frame:fullscreen .preview-fullscreen {
+  top: 1rem;
+  right: 1rem;
 }
 
 .hint {
@@ -398,6 +436,10 @@ button.small.danger {
   }
 
   dl {
+    grid-template-columns: 1fr;
+  }
+
+  .rec-meta {
     grid-template-columns: 1fr;
   }
 }

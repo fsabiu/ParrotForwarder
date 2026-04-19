@@ -86,6 +86,12 @@
       <h2>Video Preview</h2>
       <div id="preview-frame" class="preview-frame">
         <img id="preview" alt="live drone video" />
+        <div class="preview-overlay">
+          <span id="preview-status">Waiting for live video</span>
+        </div>
+        <button id="btn-preview-fullscreen" class="preview-fullscreen" type="button">
+          Full screen
+        </button>
       </div>
       <p class="hint">MJPEG live preview from the drone (downscaled, ~250 ms latency). Main full-rate stream: <code>srt://&lt;host&gt;:8890</code>.</p>
     </section>

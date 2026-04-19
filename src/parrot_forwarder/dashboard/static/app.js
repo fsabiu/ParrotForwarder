@@ -8,6 +8,8 @@ const state = {
   previewAvailable: false,
 };
 
+let previewController = null;
+
 const TELEMETRY_FIELDS = [
   "battery",
   "gps",
@@ -53,11 +55,33 @@ function setField(id, value = "-") {
 
 function syncPreviewState() {
   const frame = el("preview-frame");
+  const status = el("preview-status");
   if (!frame) return;
-  // MJPEG is independent of the SRT pipeline - it pulls RTSP directly.
-  // Show the video as soon as the first JPEG frame loads, regardless of
-  // service state.
   frame.classList.toggle("has-video", state.previewAvailable);
+  if (status) {
+    status.textContent = state.previewAvailable ? "" : previewMessageForState(state.serviceState);
+  }
+}
+
+function previewMessageForState(name) {
+  if (name === "CONNECTING") return "Connecting to drone";
+  if (name === "RESTARTING") return "Reconnecting to drone";
+  if (name === "DISCONNECTED") return "Drone disconnected";
+  if (name === "DEGRADED") return "Video reconnecting";
+  return "Waiting for live video";
+}
+
+function previewStateActive(name) {
+  return ["STREAMING", "DEGRADED"].includes(name);
+}
+
+function updatePreviewFullscreenButton() {
+  const button = el("btn-preview-fullscreen");
+  const frame = el("preview-frame");
+  if (!button || !frame) return;
+  const fullscreen = document.fullscreenElement === frame;
+  button.textContent = fullscreen ? "Exit full screen" : "Full screen";
+  button.setAttribute("aria-pressed", fullscreen ? "true" : "false");
 }
 
 function clearTelemetry() {
@@ -70,20 +94,30 @@ function clearTelemetry() {
 
 function setState(name) {
   const badge = el("state-badge");
+  const wasPreviewActive = previewStateActive(state.serviceState);
+  const isPreviewActive = previewStateActive(name);
   state.serviceState = name;
   badge.textContent = name;
   badge.className = `state state-${name.toLowerCase()}`;
   if (name === "STREAMING" && !state.startedAt) {
     state.startedAt = Date.now();
   }
-  if (!["STREAMING", "DEGRADED"].includes(name)) {
+  if (!isPreviewActive) {
     state.startedAt = null;
-    state.previewAvailable = false;
-    syncPreviewState();
     setField("uptime", "-");
   }
   if (!["STREAMING", "DEGRADED", "READY"].includes(name)) {
     clearTelemetry();
+  }
+  if (previewController) {
+    if (isPreviewActive && !wasPreviewActive) {
+      previewController.start();
+    } else if (!isPreviewActive && wasPreviewActive) {
+      previewController.stop();
+    }
+  }
+  if (!isPreviewActive) {
+    state.previewAvailable = false;
   }
   syncPreviewState();
 }
@@ -257,22 +291,60 @@ function setPreviewAvailable(value) {
 
 function wirePreviewState() {
   const preview = el("preview");
-  if (!preview) return;
+  const frame = el("preview-frame");
+  const button = el("btn-preview-fullscreen");
+  if (!preview || !frame) return;
 
   const previewUrl = () => `/preview/stream.mjpg?ts=${Date.now()}`;
   const RETRY_DELAY_MS = 1500;
   let retryTimer = null;
 
-  const reload = () => {
+  const start = () => {
     clearTimeout(retryTimer);
+    if (preview.getAttribute("src")) return;
+    setPreviewAvailable(false);
     preview.src = previewUrl();
   };
 
+  const stop = () => {
+    clearTimeout(retryTimer);
+    preview.removeAttribute("src");
+    setPreviewAvailable(false);
+  };
+
+  preview.addEventListener("load", () => {
+    setPreviewAvailable(true);
+  });
   preview.addEventListener("error", () => {
-    retryTimer = setTimeout(reload, RETRY_DELAY_MS);
+    setPreviewAvailable(false);
+    if (!previewStateActive(state.serviceState)) return;
+    retryTimer = setTimeout(start, RETRY_DELAY_MS);
   });
 
-  reload();
+  previewController = { start, stop };
+  if (previewStateActive(state.serviceState)) {
+    start();
+  }
+
+  const toggleFullscreen = async () => {
+    if (!document.fullscreenEnabled) return;
+    try {
+      if (document.fullscreenElement === frame) {
+        await document.exitFullscreen();
+      } else {
+        await frame.requestFullscreen();
+      }
+    } catch (err) {
+      console.warn("fullscreen toggle failed", err);
+    } finally {
+      updatePreviewFullscreenButton();
+    }
+  };
+
+  button?.addEventListener("click", toggleFullscreen);
+  frame.addEventListener("dblclick", toggleFullscreen);
+  document.addEventListener("fullscreenchange", updatePreviewFullscreenButton);
+  updatePreviewFullscreenButton();
 }
 
 function connectEventStream() {

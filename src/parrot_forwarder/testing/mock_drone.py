@@ -147,6 +147,11 @@ class MockDrone:
         logger.debug("MockDrone(%s) disconnected", self.ip)
         return True
 
+    def connection_state(self) -> bool:
+        """Mirror Olympe's connection-state helper."""
+        with self._lock:
+            return self._connected
+
     def get_state(self, message_class: Any) -> dict[str, Any] | None:
         """Mirror ``olympe.Drone.get_state(MessageClass)``.
 

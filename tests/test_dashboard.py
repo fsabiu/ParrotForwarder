@@ -1,10 +1,9 @@
 """
-Tests for the dashboard static mount and HLS preview stub.
+Tests for the dashboard static mount and MJPEG preview shell.
 
 The dashboard itself is a plain HTML/JS bundle with no build step -
 we check that every asset the ``index.html`` references is actually
-served and that the HLS preview stub returns a syntactically valid
-playlist so the ``<video>`` element doesn't log fetch errors.
+served and that the compatibility HLS path is intentionally gone.
 """
 
 from __future__ import annotations
@@ -52,6 +51,7 @@ def test_dashboard_index_served(client: TestClient) -> None:
     assert "state-badge" in response.text  # hook-up point for JS
     assert "preview-frame" in response.text
     assert "Waiting for live video" in response.text
+    assert "btn-preview-fullscreen" in response.text
     assert "telemetry-json" in response.text
     assert "app.js" in response.text
     assert "style.css" in response.text
@@ -65,6 +65,8 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "/control/start" in response.text, "dashboard JS must hit REST contract"
     assert "/stream/events" in response.text
     assert "preview-frame" in response.text
+    assert "/preview/stream.mjpg" in response.text
+    assert "requestFullscreen" in response.text
     assert '"READY"' in response.text
 
 
@@ -76,15 +78,12 @@ def test_dashboard_css_served(client: TestClient) -> None:
     assert "aspect-ratio: 16 / 9" in response.text
 
 
-def test_preview_stream_returns_valid_m3u8(client: TestClient) -> None:
+def test_preview_stream_m3u8_is_gone(client: TestClient) -> None:
     response = client.get("/preview/stream.m3u8")
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/vnd.apple.mpegurl"
-    body = response.text
-    assert body.startswith("#EXTM3U")
-    assert "#EXT-X-ENDLIST" in body
+    assert response.status_code == 410
+    assert "HLS replaced by /preview/stream.mjpg" in response.text
 
 
-def test_index_references_preview_m3u8(client: TestClient) -> None:
+def test_index_does_not_reference_preview_m3u8(client: TestClient) -> None:
     index = client.get("/").text
-    assert "/preview/stream.m3u8" in index
+    assert "/preview/stream.m3u8" not in index
