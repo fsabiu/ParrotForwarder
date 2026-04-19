@@ -91,6 +91,8 @@ def test_dashboard_css_served(client: TestClient) -> None:
     assert ':root[data-theme="light"]' in response.text
     assert ':root[data-theme="sun"]' in response.text
     assert "flex: 1 1 auto" in response.text
+    assert "order: -30" in response.text
+    assert "flex: 1 1 100%" in response.text
 
 
 def test_preview_stream_m3u8_is_gone(client: TestClient) -> None:
