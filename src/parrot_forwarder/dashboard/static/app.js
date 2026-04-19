@@ -168,7 +168,7 @@ function clearTelemetry() {
   for (const id of TELEMETRY_FIELDS) {
     setField(id, "-");
   }
-  setField("telemetry-json", "{}");
+  setField("telemetry-json", "");
   state.lastTelemetryAt = null;
   syncTelemetryJsonHeight();
 }
@@ -519,6 +519,13 @@ function renderTelemetry(payload, sampleTime) {
   const system = payload.system || {};
   const storage = payload.storage || {};
   const showPosition = hasDisplayablePosition(payload, position);
+
+  if (!showPosition) {
+    state.telemetryStale = true;
+    clearTelemetry();
+    return;
+  }
+
   const displayPayload = sanitizedTelemetryForDisplay(payload);
 
   state.lastTelemetryAt = Date.now();
@@ -533,19 +540,13 @@ function renderTelemetry(payload, sampleTime) {
   // don't overwrite with the raw ISO timestamp here (caused a 1 Hz flicker
   // between the timestamp and "0s ago").
 
-  setField("position-source", showPosition ? position.source || "-" : "-");
-  setField("position-message", showPosition ? position.message || "-" : "-");
-  setField(
-    "position-coords",
-    showPosition ? fmtCoords(position.latitude, position.longitude, 4) : "-"
-  );
-  setField("position-altitudes", showPosition ? fmtAltitudes(position) : "-");
-  setField("position-accuracy", showPosition ? fmtAccuracy(position) : "-");
-  setField(
-    "home-coords",
-    showPosition ? fmtCoords(position.home?.latitude, position.home?.longitude, 4) : "-"
-  );
-  setField("klv-coords", showPosition ? fmtKlvCoords(position) : "-");
+  setField("position-source", position.source || "-");
+  setField("position-message", position.message || "-");
+  setField("position-coords", fmtCoords(position.latitude, position.longitude, 4));
+  setField("position-altitudes", fmtAltitudes(position));
+  setField("position-accuracy", fmtAccuracy(position));
+  setField("home-coords", fmtCoords(position.home?.latitude, position.home?.longitude, 4));
+  setField("klv-coords", fmtKlvCoords(position));
 
   setField("gimbal-abs", fmtAxisTriplet(gimbal.absolute_deg, 2));
   setField("gimbal-rel", fmtAxisTriplet(gimbal.relative_deg, 2));

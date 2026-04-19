@@ -58,6 +58,7 @@ def test_dashboard_index_served(client: TestClient) -> None:
     assert "btn-preview-fullscreen" in response.text
     assert "Flight state" in response.text
     assert "telemetry-json" in response.text
+    assert '<pre id="telemetry-json"></pre>' in response.text
     assert "app.js" in response.text
     assert "style.css" in response.text
     assert "btn-start" not in response.text
@@ -80,6 +81,8 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "TELEMETRY_STALE_AFTER_MS = 3000" in response.text
     assert "ResizeObserver" in response.text
     assert "syncTelemetryJsonHeight" in response.text
+    assert 'setField("telemetry-json", "")' in response.text
+    assert "if (!showPosition) {" in response.text
     assert '"READY"' in response.text
     assert '["READY", "STREAMING", "DEGRADED"]' in response.text
     assert "setInterval(refreshStatus, STATUS_REFRESH_INTERVAL_MS)" in response.text
