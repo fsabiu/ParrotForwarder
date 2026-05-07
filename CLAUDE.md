@@ -1,5 +1,17 @@
 # ParrotForwarder
 
+## Mandatory Project Governance
+
+Before working here, read the root project files:
+
+1. `../PROJECT.md`
+2. `../CONTRIBUTING.md`
+3. `../work-packages/WP-03-parrot-forwarder/README.md`, `PLAN.md`, and `EVIDENCE.md`
+
+Do not rely on chat history as authority. Decisions, status, contracts, and validation evidence must be written in the source-of-truth docs.
+
+All implementation work targets the ParrotForwarder `e2e` branch once aligned and enters through PR. Francesco is the only reviewer / merger for `e2e`.
+
 Captures H.264 video + MISB 0601 KLV telemetry from Parrot Anafi drones and
 muxes them into a single MPEG-TS stream over SRT.
 
@@ -14,6 +26,10 @@ stack:
 - passes `/dev/bus/usb` through for the Skycontroller
 - restarts the container after crashes and guest reboots via
   `restart: unless-stopped`
+
+Root integration uses the root `docker-compose.yml` service name `parrot-forwarder`.
+Publish SRT and dashboard settings through environment variables; do not hardcode
+field hostnames, local IPs, wallets, or secrets in source.
 
 ## Requirements
 
