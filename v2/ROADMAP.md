@@ -36,7 +36,7 @@ Goal: external integrations have a contract.
 - `GET /health`, `GET /status`, `GET /config`.
 - `POST /control/start`, `/control/stop`, `/control/reset`.
 - WebSocket `/stream/events` (state transitions, errors, restarts).
-- WebSocket `/stream/telemetry` (10 Hz KLV-equivalent JSON).
+- WebSocket `/stream/telemetry` (30 Hz default KLV-equivalent JSON).
 - Prometheus `/metrics`.
 - OpenAPI spec auto-generated and committed to `docs/openapi.yaml`.
 

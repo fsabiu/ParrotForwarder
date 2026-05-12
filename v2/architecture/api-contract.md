@@ -53,6 +53,29 @@ Full current state snapshot.
 
 Effective config after layering (defaults < yaml < env < cli), with secrets redacted. Useful for debugging.
 
+### `PUT /config/forwarder/telemetry-fps`
+
+Update the in-memory telemetry/KLV target rate. Valid range: 1-100 Hz. If the
+worker is active, the supervisor requests a controlled reset so the next worker
+starts with the new telemetry cadence. Persist the value in `config.yaml` or env
+for reboot durability.
+
+```
+{ "telemetry_fps": 30 }
+```
+
+Response:
+
+```
+{
+  "telemetry_fps": 30,
+  "previous_telemetry_fps": 30,
+  "restart_requested": true,
+  "state": "STREAMING",
+  "message": "telemetry_fps updated; worker reset requested"
+}
+```
+
 ### `POST /control/start`
 
 Start forwarding. No body. Idempotent; returns 409 if already past `DISCONNECTED`.
@@ -89,7 +112,12 @@ Client sends nothing. Connection drops when supervisor exits.
 
 ### `ws://localhost:8080/stream/telemetry`
 
-Server-to-client telemetry stream at supervisor-rate-limited 10 Hz. JSON per tick. The payload keeps the top-level summary metrics the dashboard needs immediately, plus grouped telemetry sections and the raw flat snapshot for debugging/downstream consumers.
+Server-to-client telemetry stream at the configured telemetry rate, 30 Hz by
+default. JSON per tick. The payload keeps the top-level summary metrics the
+dashboard needs immediately, plus grouped telemetry sections and the raw flat
+snapshot for debugging/downstream consumers. The raw snapshot also carries
+`olympe_state` and `olympe_event_state` when the real Olympe runtime can supply
+the SDK state cache or sticky event payloads.
 
 ```
 {
@@ -142,7 +170,8 @@ Server-to-client telemetry stream at supervisor-rate-limited 10 Hz. JSON per tic
 }
 ```
 
-Rate is configurable by query: `?rate=2` for 2 Hz, capped at drone's native update rate.
+Rate is configurable by query: `?rate=2` for 2 Hz. A client cannot receive
+faster than the worker-published telemetry cadence.
 
 ## Static
 

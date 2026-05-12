@@ -83,7 +83,7 @@ Common LAN examples:
 ### ✅ Telemetry/KLV Metadata
 
 - **MISB 0601 compliant** KLV encoding with comprehensive sensor data
-- **10 Hz update rate** for telemetry
+- **30 Hz update rate** for telemetry by default
 - **Comprehensive data:**
   - Unix timestamp (microseconds)
   - GPS position (latitude, longitude, altitude MSL) with fallback defaults
@@ -91,6 +91,7 @@ Common LAN examples:
   - Gimbal state (absolute and relative yaw/pitch/roll angles)
   - Camera sensor parameters (width, height, focal length)
   - Battery level and GPS fix status
+  - Full sanitized Olympe SDK state cache in KLV tag 120 for detector evidence
 - **GPS fallback system** - uses default coordinates when GPS unavailable
 - **Enhanced sensor tracking** - includes gimbal offsets and camera alignment
 - **Validation and scaling** per MISB 0601 specification
@@ -99,7 +100,7 @@ Common LAN examples:
 ### ✅ Performance Monitoring
 
 - **Real-time FPS tracking** (target vs actual)
-- **Telemetry performance:** 10.0 fps actual, 0 errors
+- **Telemetry performance:** 30.0 fps actual, 0 errors
 - **Video streaming status:** Periodic health reports (uptime, port, errors/warnings)
 - **Loop timing statistics** (avg, min, max)
 - **Performance indicators** (✓ ≥95%, ⚠ 80-95%, ✗ <80%)
@@ -175,7 +176,7 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
 │  │ • Collects telemetry     │   │ • RTSP input (drone) │  │
 │  │ • Encodes to KLV         │   │ • UDP input (KLV)    │  │
 │  │ • MISB 0601 format       │   │ • mpegtsmux          │  │
-│  │ • Precise 10 Hz timing   │   │ • SRT output         │  │
+│  │ • Precise 30 Hz timing   │   │ • SRT output         │  │
 │  │ • Performance stats      │   │ • Status monitoring  │  │
 │  │ • Sends to localhost UDP │   │ • Error tracking     │  │
 │  │ • GPS fallback system    │   │ • Latency modes      │  │
@@ -242,7 +243,7 @@ Main Thread (ParrotForwarder)
     │                   ├─ Reads: Olympe drone.get_state()
     │                   ├─ Encodes: JSON → KLV (MISB 0601)
     │                   ├─ Writes: UDP socket to localhost:12345
-    │                   └─ Independent timing loop (10 Hz)
+    │                   └─ Independent timing loop (30 Hz default)
     │
     ├─── Creates ──→ VideoForwarder Thread
     │                   │
@@ -343,7 +344,7 @@ mpegtsmux → srtsink uri=srt://0.0.0.0:8890 latency=100 mode=listener
 ```
 ┌─ Telemetry ─────────────────────────────────────┐
 │ Drone State → get_state() → KLV Encoder →       │
-│  (Olympe)      (10 Hz)       (MISB 0601)        │
+│  (Olympe)      (30 Hz)       (MISB 0601)        │
 │                                   ↓              │
 │                              UDP localhost:12345 │
 └──────────────────────────────────┼──────────────┘
@@ -378,7 +379,7 @@ mpegtsmux → srtsink uri=srt://0.0.0.0:8890 latency=100 mode=listener
 
 | Component | Target | Typical Performance | Notes |
 |-----------|--------|---------------------|-------|
-| Telemetry Thread | 10 Hz | 10.0 Hz (100%) | KLV encoding @ 10 fps, 0 errors |
+| Telemetry Thread | 30 Hz | 30.0 Hz (100%) | KLV encoding @ 30 fps, 0 errors |
 | Video Stream | 29.97 fps | 29.97 fps | H.264 from drone, no transcoding |
 | Unified Stream | N/A | Video + Data | Both streams synchronized in MPEG-TS |
 | KLV Encoding | <1ms | ~0.1ms per packet | MISB 0601 encoding overhead |
@@ -513,7 +514,7 @@ python ParrotForwarder.py [OPTIONS]
 Options:
   --drone-ip IP                 Drone IP address (default: 192.168.53.1)
   --srt-port PORT               SRT output port (default: 8890)
-  --telemetry-fps FPS           Telemetry/KLV update rate in Hz (default: 10)
+  --telemetry-fps FPS           Telemetry/KLV update rate in Hz (default: 30)
   --video-fps FPS               Video framerate (default: 30, informational)
   --duration SECONDS            Run duration in seconds (default: infinite)
   --max-retries N               Maximum connection retry attempts (default: infinite)
@@ -621,7 +622,7 @@ python ParrotForwarder.py \
 
 ### KLV Telemetry Data Fields
 
-The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
+The telemetry forwarder encodes the following MISB 0601 KLV tags at 30 Hz by default:
 
 #### Core Platform Data
 | MISB 0601 Tag | Field | Type | Description | Encoding |
@@ -629,7 +630,7 @@ The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 | Tag 2 | `timestamp` | uint64 | Unix timestamp | Microseconds since epoch |
 | Tag 13 | `latitude` | int32 | Sensor latitude | Degrees × 10^7, range ±90° |
 | Tag 14 | `longitude` | int32 | Sensor longitude | Degrees × 10^7, range ±180° |
-| Tag 15 | `altitude` | uint16 | Sensor altitude MSL | Meters, 0-19,900m range |
+| Tag 15 | `altitude` | uint16 | Sensor altitude MSL | Meters × 10, 0-6553.5m range |
 | Tag 5 | `roll` | int16 | Platform roll | Degrees × 100, range ±180° |
 | Tag 6 | `pitch` | int16 | Platform pitch | Degrees × 100, range ±90° |
 | Tag 7 | `yaw` | uint16 | Platform heading | Degrees × 100, 0-360° |
@@ -637,6 +638,8 @@ The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 #### Camera Sensor Parameters
 | MISB 0601 Tag | Field | Type | Description | Encoding |
 |---------------|-------|------|-------------|----------|
+| Tag 16 | `sensor_h_fov` | uint16 | Horizontal field of view | Degrees × 100 |
+| Tag 17 | `sensor_v_fov` | uint16 | Vertical field of view | Degrees × 100 |
 | Tag 102 | `sensor_width` | float32 | Sensor width | Millimeters (6.3mm) |
 | Tag 103 | `sensor_height` | float32 | Sensor height | Millimeters (4.7mm) |
 | Tag 104 | `focal_length` | float32 | Focal length | Millimeters (23mm equiv) |
@@ -655,14 +658,15 @@ The telemetry forwarder encodes the following MISB 0601 KLV tags at 10 Hz:
 | Tag 106 | `gimbal_pitch_abs` | int32 | Gimbal absolute pitch | Degrees × 10^6, range ±90° |
 | Tag 107 | `gimbal_roll_abs` | int32 | Gimbal absolute roll | Degrees × 10^6, range ±180° |
 
-**Additional drone data collected (not in KLV stream):**
-- Battery level (%)
-- GPS fix status
-- Flying state
-- Altitude AGL
-- Speed vector (x, y, z)
-- Gimbal offsets (real-time corrections)
-- Camera alignment offsets (fixed misalignment)
+#### AION Full Telemetry Extension
+| KLV Tag | Field | Type | Description | Encoding |
+|---------|-------|------|-------------|----------|
+| Tag 120 | `aion_telemetry_json` | UTF-8 JSON | Complete ParrotForwarder telemetry sample | BER length + JSON, see `docs/contract.md` |
+
+The AION extension carries every collected real-time telemetry value, including
+battery, GPS validity/accuracy, AGL/takeoff altitude, speed, gimbal offsets,
+camera alignment, storage, product/version, motor-flight counters, and the
+sanitized raw Olympe SDK state cache from `query_state("")`.
 
 **KLV Packet Structure:**
 - Universal Label: `06 0E 2B 34 02 0B 01 01 0E 01 03 01 01 00 00 00`
@@ -705,7 +709,7 @@ pipeline = self._build_high_latency_pipeline(drone_rtsp_url)
 python ParrotForwarder.py --telemetry-fps 5
 
 # Higher rate for more frequent telemetry updates
-python ParrotForwarder.py --telemetry-fps 20
+python ParrotForwarder.py --telemetry-fps 60
 ```
 
 **Note**: Video rate (29.97 fps) is fixed by the drone and cannot be changed.
@@ -730,20 +734,20 @@ On a Linux system (tested on Ubuntu 25 with 4GB RAM), with default settings:
 
 ```
 Telemetry Forwarder:
-  ✓ Target: 10.0 fps, Actual: 10.0 fps (100.0%)
-  KLV packets sent: 600 (10/sec)
+  ✓ Target: 30.0 fps, Actual: 30.0 fps (100.0%)
+  KLV packets sent: 1800 (30/sec)
   Errors: 0
   Loop time: avg=0.08ms, min=0.05ms, max=0.15ms
 
 Video Forwarder (GStreamer):
   ✓ Input: RTSP from drone @ 29.97 fps
   ✓ Output: MPEG-TS over SRT @ 29.97 fps
-  ✓ KLV muxed: 10 packets/sec
+  ✓ KLV muxed: 30 packets/sec
   Status: Running, no errors
 
 Unified Stream:
   ✓ Stream 0: Video (H.264) - 1280x720 @ 29.97 fps
-  ✓ Stream 1: Data (KLV) - MISB 0601 @ 10 Hz
+  ✓ Stream 1: Data (KLV) - MISB 0601 @ 30 Hz
   ✓ Synchronization: Inherent via MPEG-TS timestamps
 ```
 
@@ -759,9 +763,9 @@ Performance statistics are logged automatically:
 
 ```
 # Telemetry stats (every 5 seconds)
-[21:32:05] INFO - TelemetryForwarder - ✓ PERFORMANCE: 
-    Target=10.0 fps, Actual=10.00 fps (100.0%) | 
-    Loop: avg=0.34ms, min=0.17ms, max=0.53ms | 
+[21:32:05] INFO - TelemetryForwarder - ✓ PERFORMANCE:
+    Target=30.0 fps, Actual=30.00 fps (100.0%) |
+    Loop: avg=0.34ms, min=0.17ms, max=0.53ms |
     Count=2681 | KLV: sent=2681, errors=0
 
 # Video stats (every 30 seconds, configurable)
@@ -948,7 +952,7 @@ The service now automatically handles drone disconnections:
 ```
 # Normal operation
 [13:20:00] INFO - VideoForwarder - ✓ STREAMING | Uptime: 00:05:00 | Port: 8890 | Issues: 0 errors, 0 warnings
-[13:20:05] INFO - TelemetryForwarder - ✓ PERFORMANCE: Target=10.0 fps, Actual=10.00 fps (100.0%)
+[13:20:05] INFO - TelemetryForwarder - ✓ PERFORMANCE: Target=30.0 fps, Actual=30.00 fps (100.0%)
 
 # Drone disconnect detected
 [13:20:10] WARNING - ParrotForwarder - ⚠ Drone connection lost! Attempting to reconnect...

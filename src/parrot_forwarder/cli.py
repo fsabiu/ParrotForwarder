@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument(
         '--telemetry-fps',
         type=int,
-        default=10,
+        default=30,
         help='Frames per second for telemetry forwarding'
     )
     parser.add_argument(
@@ -146,4 +146,3 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-

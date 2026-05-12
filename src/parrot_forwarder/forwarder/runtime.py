@@ -23,7 +23,7 @@ class RuntimeConfig:
     drone_ip: str = "192.168.53.1"
     video_ip: str | None = None
     device_kind: Literal["drone", "skycontroller"] = "drone"
-    telemetry_fps: int = 10
+    telemetry_fps: int = 30
     video_fps: int = 30
     srt_port: int = 8890
     klv_port: int = 12345
@@ -96,7 +96,8 @@ def _normalize_telemetry(snapshot: dict[str, object]) -> dict[str, object]:
         "gps_fix": gps_fix,
         "position_valid": raw.get("position_valid"),
         "rssi_dbm": raw.get("rssi_dbm"),
-        "fps": raw.get("fps"),
+        "telemetry_hz": raw.get("telemetry_hz", raw.get("telemetry_target_hz")),
+        "fps": raw.get("fps", raw.get("telemetry_hz", raw.get("telemetry_target_hz"))),
     }
 
     position = _compact(
@@ -464,6 +465,7 @@ class MockForwarderRuntime:
         return {
             "battery_percent": 75,
             "gps_fix": True,
+            "telemetry_hz": float(self.config.telemetry_fps),
             "fps": float(self.config.video_fps),
         }
 

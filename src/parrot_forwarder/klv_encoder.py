@@ -5,9 +5,12 @@ Implements a minimal MISB 0601 KLV encoder without external dependencies.
 KLV (Key-Length-Value) is a binary encoding standard used for metadata.
 """
 
-import struct
+import json
 import math
+import struct
 from typing import Dict, Any, Optional
+
+AION_TELEMETRY_CONTRACT_VERSION = "aion.parrot.telemetry.v1"
 
 
 class MISB0601Encoder:
@@ -42,6 +45,7 @@ class MISB0601Encoder:
     TAG_SENSOR_WIDTH = 102      # Sensor width (millimeters)
     TAG_SENSOR_HEIGHT = 103     # Sensor height (millimeters)
     TAG_FOCAL_LENGTH = 104      # Focal length (millimeters)
+    TAG_AION_TELEMETRY_JSON = 120  # AION full telemetry JSON extension
     
     # Custom tags for gimbal absolute angles (vendor-specific 105-110)
     TAG_GIMBAL_ABS_YAW = 105    # Gimbal absolute yaw (degrees)
@@ -277,6 +281,23 @@ class MISB0601Encoder:
         scaled = int(roll * 1e6)
         value = struct.pack('>i', scaled)
         self.items.append((self.TAG_GIMBAL_ABS_ROLL, value))
+
+    def add_aion_telemetry_json(self, payload: dict[str, Any]):
+        """
+        Add the AION full telemetry JSON extension.
+
+        Standard MISB 0601 tags remain the stable geolocation core. This
+        project-specific tag carries every ParrotForwarder real-time field so
+        the detector can consume the complete contract without waiting for new
+        one-off binary tags for every SDK value.
+        """
+        value = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        self.items.append((self.TAG_AION_TELEMETRY_JSON, value))
     
     def _encode_ber_length(self, length: int) -> bytes:
         """
@@ -312,9 +333,11 @@ class MISB0601Encoder:
         lds_value = bytearray()
         
         for tag, value in self.items:
-            # Each item: Tag (1 byte) + Length (1 byte) + Value
+            # Each item: Tag (1 byte) + BER Length + Value. Most fields fit in
+            # the historical one-byte length; the AION JSON extension can be
+            # larger, so item lengths use BER as well.
             lds_value.append(tag)
-            lds_value.append(len(value))
+            lds_value.extend(self._encode_ber_length(len(value)))
             lds_value.extend(value)
         
         # Build complete KLV packet: Key + Length + Value
@@ -324,6 +347,17 @@ class MISB0601Encoder:
         klv_packet.extend(lds_value)
         
         return bytes(klv_packet)
+
+
+def _build_aion_telemetry_payload(telemetry: Dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contract_version": AION_TELEMETRY_CONTRACT_VERSION,
+        "source": "parrot_forwarder",
+        "timestamp": telemetry.get("timestamp"),
+        "timestamp_us": telemetry.get("timestamp_us"),
+        "sequence": telemetry.get("sequence"),
+        "telemetry": telemetry,
+    }
 
 
 def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
@@ -434,6 +468,8 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
         
         # Note: Gimbal offsets and camera alignment offsets are collected
         # in telemetry dict and available for post-processing or alternative uses
+
+        encoder.add_aion_telemetry_json(_build_aion_telemetry_payload(telemetry))
         
         # Pack and return (even if empty - will contain just the KLV header)
         return encoder.pack()

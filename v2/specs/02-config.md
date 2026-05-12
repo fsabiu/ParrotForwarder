@@ -24,7 +24,7 @@ drone:
 forwarder:
   srt_port: 8890              # main output
   klv_port: 12345             # local UDP, auto-incremented if busy
-  telemetry_fps: 10
+  telemetry_fps: 30
   video_fps: 30               # passthrough; drone decides actual rate
 
 supervisor:

@@ -393,6 +393,46 @@ dd {
   font-weight: 700;
 }
 
+.telemetry-rate-control {
+  display: grid;
+  grid-template-columns: 4.5rem auto 1fr;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.telemetry-rate-control input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.32rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+}
+
+.telemetry-rate-control button {
+  padding: 0.32rem 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--button-bg-start), var(--button-bg-end));
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.telemetry-rate-control button:hover {
+  background: linear-gradient(180deg, var(--button-hover-start), var(--button-hover-end));
+}
+
+.telemetry-rate-control span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .raw {
   display: flex;
   flex-direction: column;
@@ -705,6 +745,14 @@ button.small.danger {
   .telemetry-compact .compact-dl {
     grid-template-columns: minmax(5.4rem, auto) 1fr;
     gap: 0.18rem 0.55rem;
+  }
+
+  .telemetry-rate-control {
+    grid-template-columns: 4rem auto;
+  }
+
+  .telemetry-rate-control span {
+    grid-column: 1 / -1;
   }
 
   .rec-meta {

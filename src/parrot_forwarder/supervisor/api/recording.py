@@ -22,6 +22,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, HTTPException
 from fastapi import status as http_status
@@ -91,11 +92,11 @@ def create_recording_router(
                 )
             )
         except AlreadyRecordingError as exc:
-            raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail=str(exc))
+            raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         except RecordingStartFailed as exc:
             raise HTTPException(
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
-            )
+            ) from exc
         return {
             "recording_id": active.recording_id,
             "path": active.path,
@@ -111,7 +112,7 @@ def create_recording_router(
         try:
             result = await recorder.stop()
         except NotRecordingError as exc:
-            raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail=str(exc))
+            raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         return {
             "recording_id": result.recording_id,
             "path": result.path,
@@ -141,7 +142,7 @@ def create_recording_router(
         try:
             usage = index.disk_usage(root)
         except FileNotFoundError as exc:
-            raise HTTPException(status_code=500, detail=f"recordings path missing: {exc}")
+            raise HTTPException(status_code=500, detail=f"recordings path missing: {exc}") from exc
         return {
             "path": str(root),
             "used_bytes": usage.used_bytes,
@@ -158,7 +159,7 @@ def create_recording_router(
         sidecar_path = Path(row.path).with_suffix(".meta.json")
         if sidecar_path.exists():
             try:
-                data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                data = cast(dict[str, object], json.loads(sidecar_path.read_text(encoding="utf-8")))
                 data["_index"] = _row_to_dict(row)
                 return data
             except (OSError, json.JSONDecodeError) as exc:
@@ -201,7 +202,7 @@ def create_recording_router(
             if old_sidecar.exists():
                 old_sidecar.rename(trash_dir / old_sidecar.name)
         except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"soft-delete failed: {exc}")
+            raise HTTPException(status_code=500, detail=f"soft-delete failed: {exc}") from exc
         index.soft_delete(recording_id, str(new_path))
         return {"recording_id": recording_id, "path": str(new_path), "state": "deleted"}
 

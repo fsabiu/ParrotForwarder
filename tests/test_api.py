@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from parrot_forwarder import ipc as ipc_module
+from parrot_forwarder.config import Config
 from parrot_forwarder.state_machine import State
 from parrot_forwarder.supervisor import Supervisor, WorkerHandle
 from parrot_forwarder.supervisor.api import REQUEST_ID_HEADER, create_app
@@ -99,6 +100,70 @@ async def test_config_endpoint_returns_backoff_shape(client: TestClient) -> None
     assert "backoff" in body
     assert body["backoff"]["base_seconds"] > 0
     assert "auto_start" in body
+
+
+async def test_config_endpoint_returns_effective_config_when_attached(
+    supervisor: Supervisor,
+) -> None:
+    client = TestClient(create_app(supervisor, Config()))
+    response = client.get("/config")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["forwarder"]["telemetry_fps"] == 30
+    assert body["supervisor"]["http"]["port"] == 8080
+
+
+async def test_update_telemetry_fps_updates_runtime_config(
+    supervisor: Supervisor,
+) -> None:
+    current = Config()
+
+    def _setter(hz: int) -> Config:
+        nonlocal current
+        current = current.model_copy(
+            update={
+                "forwarder": current.forwarder.model_copy(
+                    update={"telemetry_fps": hz}
+                )
+            }
+        )
+        return current
+
+    client = TestClient(create_app(supervisor, current, set_telemetry_fps=_setter))
+    response = client.put("/config/forwarder/telemetry-fps", json={"telemetry_fps": 42})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["previous_telemetry_fps"] == 30
+    assert body["telemetry_fps"] == 42
+    assert body["restart_requested"] is False
+    assert client.get("/config").json()["forwarder"]["telemetry_fps"] == 42
+
+
+async def test_update_telemetry_fps_requests_reset_when_active(
+    supervisor: Supervisor,
+) -> None:
+    events: list[object] = []
+
+    async def _post_event(event: object) -> None:
+        events.append(event)
+
+    supervisor.state_machine.state = State.STREAMING
+    supervisor.post_event = _post_event  # type: ignore[method-assign]
+    client = TestClient(create_app(supervisor, Config()))
+    response = client.put("/config/forwarder/telemetry-fps", json={"telemetry_fps": 15})
+
+    assert response.status_code == 200
+    assert response.json()["restart_requested"] is True
+    assert any(type(event).__name__ == "UserReset" for event in events)
+
+
+async def test_update_telemetry_fps_validates_range(
+    supervisor: Supervisor,
+) -> None:
+    client = TestClient(create_app(supervisor, Config()))
+    response = client.put("/config/forwarder/telemetry-fps", json={"telemetry_fps": 0})
+    assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -229,5 +294,13 @@ async def test_openapi_exposed(client: TestClient) -> None:
     assert response.status_code == 200
     doc: dict[str, Any] = response.json()
     paths = doc.get("paths", {})
-    for expected in ("/health", "/status", "/config", "/control/start", "/control/stop", "/control/reset"):
+    for expected in (
+        "/health",
+        "/status",
+        "/config",
+        "/config/forwarder/telemetry-fps",
+        "/control/start",
+        "/control/stop",
+        "/control/reset",
+    ):
         assert expected in paths, f"missing {expected} in OpenAPI"

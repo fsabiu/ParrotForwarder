@@ -16,7 +16,7 @@ drone:
 forwarder:
   srt_port: 8890                   # main MPEG-TS/SRT output
   klv_port: 12345                  # local UDP; auto-incremented if busy
-  telemetry_fps: 10                # reloadable - KLV update rate (Hz)
+  telemetry_fps: 30                # reloadable - KLV update rate (Hz)
   video_fps: 30                    # informational; drone decides actual rate
 
 supervisor:

@@ -12,8 +12,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TYPE_CHECKING, cast
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +59,18 @@ class ResetRequest(BaseModel):
     reason: str | None = None
 
 
+class TelemetryFpsUpdateRequest(BaseModel):
+    telemetry_fps: int = Field(ge=1, le=100)
+
+
+class TelemetryFpsUpdateResponse(BaseModel):
+    telemetry_fps: int
+    previous_telemetry_fps: int | None = None
+    restart_requested: bool = False
+    state: str
+    message: str
+
+
 class Problem(BaseModel):
     """RFC 7807 problem+json body."""
 
@@ -76,11 +88,12 @@ class Problem(BaseModel):
 
 def create_app(
     supervisor: Supervisor,
-    config: "Config | None" = None,
+    config: Config | None = None,
     *,
-    recorder: "Recorder | None" = None,
-    recording_index: "RecordingIndex | None" = None,
-    recordings_root: "_Path | None" = None,
+    set_telemetry_fps: Callable[[int], Config] | None = None,
+    recorder: Recorder | None = None,
+    recording_index: RecordingIndex | None = None,
+    recordings_root: _Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app wired to ``supervisor``.
 
@@ -110,6 +123,8 @@ def create_app(
     )
 
     app.middleware("http")(_request_id_middleware)
+    app.state.config = config
+    app.state.set_telemetry_fps = set_telemetry_fps
 
     app.add_exception_handler(HTTPException, _http_exception_to_problem)
     app.add_exception_handler(StarletteHTTPException, _http_exception_to_problem)
@@ -195,9 +210,12 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
 
     @app.get("/config", summary="Effective configuration")
     async def _config() -> dict[str, object]:
-        # Config loading is the supervisor's caller's responsibility; we
-        # expose only what the runtime knows about. Future tasks (T11/T12)
-        # attach the full loaded config here.
+        cfg = cast("Config | None", getattr(app.state, "config", None))
+        if cfg is not None:
+            return cast(dict[str, object], cfg.model_dump(mode="json"))
+
+        # Unit-test fallback when create_app is intentionally called without
+        # the runtime config object.
         return {
             "backoff": {
                 "base_seconds": supervisor.backoff_policy.base_seconds,
@@ -206,6 +224,52 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
             },
             "auto_start": supervisor.auto_start,
         }
+
+    @app.put(
+        "/config/forwarder/telemetry-fps",
+        response_model=TelemetryFpsUpdateResponse,
+        summary="Update telemetry/KLV target rate and reset the worker if active",
+    )
+    async def _set_telemetry_fps(body: TelemetryFpsUpdateRequest) -> TelemetryFpsUpdateResponse:
+        cfg = cast("Config | None", getattr(app.state, "config", None))
+        setter = cast(
+            "Callable[[int], Config] | None",
+            getattr(app.state, "set_telemetry_fps", None),
+        )
+        if cfg is None and setter is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="runtime configuration is not attached",
+            )
+
+        previous = cfg.forwarder.telemetry_fps if cfg is not None else None
+        if setter is not None:
+            cfg = setter(body.telemetry_fps)
+        else:
+            assert cfg is not None
+            next_forwarder = cfg.forwarder.model_copy(update={"telemetry_fps": body.telemetry_fps})
+            cfg = cfg.model_copy(update={"forwarder": next_forwarder})
+        app.state.config = cfg
+
+        state_name = supervisor.state_machine.state.value
+        changed = previous != body.telemetry_fps
+        restart_requested = changed and state_name != "DISCONNECTED"
+        if restart_requested:
+            await supervisor.post_event(
+                UserReset(reason=f"telemetry_fps changed to {body.telemetry_fps} Hz")
+            )
+
+        return TelemetryFpsUpdateResponse(
+            telemetry_fps=body.telemetry_fps,
+            previous_telemetry_fps=previous,
+            restart_requested=restart_requested,
+            state=state_name,
+            message=(
+                "telemetry_fps updated; worker reset requested"
+                if restart_requested
+                else "telemetry_fps updated"
+            ),
+        )
 
     @app.post(
         "/control/start",
@@ -246,9 +310,14 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
 # ---------------------------------------------------------------------------
 
 
-def make_asgi_app(supervisor: Supervisor, config: "Config | None" = None) -> ASGIApp:
+def make_asgi_app(
+    supervisor: Supervisor,
+    config: Config | None = None,
+    *,
+    set_telemetry_fps: Callable[[int], Config] | None = None,
+) -> ASGIApp:
     """Return the ASGI callable for uvicorn."""
-    return create_app(supervisor, config)
+    return create_app(supervisor, config, set_telemetry_fps=set_telemetry_fps)
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +400,7 @@ def _build_mjpeg_pipeline(rtsp_url: str) -> list[str]:
     return ["/bin/bash", "-c", wrapper]
 
 
-def _register_preview(app: FastAPI, config: "Config | None") -> None:
+def _register_preview(app: FastAPI, config: Config | None) -> None:
     """Live MJPEG preview pulled from the drone RTSP stream.
 
     Replaces the previous HLS stub. One subprocess per HTTP client; killed
@@ -354,9 +423,10 @@ def _register_preview(app: FastAPI, config: "Config | None") -> None:
                 stderr=asyncio.subprocess.DEVNULL,
             )
         except FileNotFoundError as exc:
-            raise HTTPException(status_code=503, detail=f"gst-launch missing: {exc}")
+            raise HTTPException(status_code=503, detail=f"gst-launch missing: {exc}") from exc
 
-        async def stream_body():
+        async def stream_body() -> AsyncIterator[bytes]:
+            assert proc.stdout is not None
             try:
                 while True:
                     if await request.is_disconnected():
@@ -370,7 +440,7 @@ def _register_preview(app: FastAPI, config: "Config | None") -> None:
                     try:
                         proc.terminate()
                         await asyncio.wait_for(proc.wait(), timeout=2)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         proc.kill()
                     except Exception:
                         pass

@@ -32,7 +32,10 @@ Single-page app served by the supervisor at `/`. Localhost-only.
 ## Interactions
 
 - State badge color: green (STREAMING), yellow (READY / DEGRADED / CONNECTING), red (DISCONNECTED / RESTARTING), grey (unknown).
-- Telemetry values update at 10 Hz from `/stream/telemetry`.
+- Telemetry values update at the configured telemetry rate from `/stream/telemetry`
+  (30 Hz by default). Operators can change the target telemetry Hz from the
+  dashboard; active workers are reset so the next worker starts with the new
+  KLV/WebSocket cadence.
 - Event log tails `/stream/events`, newest at top, cap at 200 rows.
 - Buttons call `/control/start|stop|reset`. Disabled when action is invalid in current state.
 - Reset button confirms with a native `window.confirm`. No other modals.

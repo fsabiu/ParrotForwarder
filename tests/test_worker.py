@@ -71,6 +71,7 @@ async def test_worker_waits_for_real_pipeline_start_and_reports_video_loss() -> 
         send=send,
         stop_event=stop_event,
         heartbeat_interval=0.001,
+        telemetry_fps=1000,
     )
 
     assert code == 0
@@ -114,8 +115,40 @@ async def test_worker_stays_ready_while_pipeline_never_starts() -> None:
         send=send,
         stop_event=stop_event,
         heartbeat_interval=0.001,
+        telemetry_fps=1000,
     )
 
     assert code == 0
     assert any(isinstance(msg, ipc_module.OlympeConnectedMsg) for msg in messages)
     assert not any(isinstance(msg, ipc_module.PipelineStartedMsg) for msg in messages)
+
+
+@pytest.mark.asyncio
+async def test_worker_telemetry_rate_is_independent_from_heartbeat() -> None:
+    runtime = _FakeRuntime([True, True])
+    messages: list[ipc_module._IpcBase] = []
+    stop_event = asyncio.Event()
+    telemetry_count = 0
+    heartbeat_count = 0
+
+    async def send(message: ipc_module._IpcBase) -> None:
+        nonlocal telemetry_count, heartbeat_count
+        messages.append(message)
+        if isinstance(message, ipc_module.TelemetryMsg):
+            telemetry_count += 1
+        if isinstance(message, ipc_module.HeartbeatMsg):
+            heartbeat_count += 1
+        if telemetry_count >= 5:
+            stop_event.set()
+
+    code = await _run_runtime_loop(
+        runtime,
+        send=send,
+        stop_event=stop_event,
+        heartbeat_interval=1.0,
+        telemetry_fps=200,
+    )
+
+    assert code == 0
+    assert telemetry_count >= 5
+    assert heartbeat_count <= 1

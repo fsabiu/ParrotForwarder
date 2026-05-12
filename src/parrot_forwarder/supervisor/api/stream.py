@@ -85,6 +85,8 @@ def register_stream_routes(
     *,
     events: Broadcaster,
     telemetry: Broadcaster,
+    default_telemetry_rate_hz: int = 30,
+    max_telemetry_rate_hz: int = 100,
 ) -> None:
     """Attach ``/stream/events`` and ``/stream/telemetry`` to ``app``."""
 
@@ -95,9 +97,33 @@ def register_stream_routes(
     @app.websocket("/stream/telemetry")
     async def _telemetry_ws(
         ws: WebSocket,
-        rate: int = Query(default=10, ge=1, le=100, description="Max Hz"),
+        rate: int | None = Query(
+            default=None,
+            ge=1,
+            le=max_telemetry_rate_hz,
+            description="Max Hz",
+        ),
     ) -> None:
-        await _serve(ws, telemetry, rate_hz=rate)
+        rate_hz = rate or _configured_telemetry_rate_hz(
+            app,
+            default_rate_hz=default_telemetry_rate_hz,
+            max_rate_hz=max_telemetry_rate_hz,
+        )
+        await _serve(ws, telemetry, rate_hz=rate_hz)
+
+
+def _configured_telemetry_rate_hz(
+    app: FastAPI,
+    *,
+    default_rate_hz: int,
+    max_rate_hz: int,
+) -> int:
+    cfg = getattr(app.state, "config", None)
+    try:
+        value = int(cfg.forwarder.telemetry_fps) if cfg is not None else default_rate_hz
+    except (AttributeError, TypeError, ValueError):
+        value = default_rate_hz
+    return max(1, min(max_rate_hz, value))
 
 
 async def _serve(

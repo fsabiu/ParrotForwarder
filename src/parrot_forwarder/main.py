@@ -27,7 +27,7 @@ class ParrotForwarder:
     Manages both telemetry and video forwarding threads.
     """
     
-    def __init__(self, drone_ip, telemetry_fps=10, video_fps=30,
+    def __init__(self, drone_ip, telemetry_fps=30, video_fps=30,
                  srt_port=8890, klv_port_start=12345, auto_reconnect=True,
                  health_check_interval=5, video_stats_interval=30,
                  video_ip: str | None = None,
