@@ -77,7 +77,7 @@ class ForwarderConfig(BaseModel):
         le=65535,
         description="Local UDP port for KLV; auto-incremented by runtime if busy",
     )
-    telemetry_fps: int = Field(default=10, ge=1, le=100, description="Telemetry/KLV rate (Hz)")
+    telemetry_fps: int = Field(default=30, ge=1, le=100, description="Telemetry/KLV rate (Hz)")
     video_fps: int = Field(
         default=30,
         ge=1,

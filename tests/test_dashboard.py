@@ -57,6 +57,9 @@ def test_dashboard_index_served(client: TestClient) -> None:
     assert "Waiting for live video" in response.text
     assert "btn-preview-fullscreen" in response.text
     assert "Flight state" in response.text
+    assert "Telemetry Hz" in response.text
+    assert "telemetry-hz-input" in response.text
+    assert "btn-telemetry-hz-apply" in response.text
     assert "telemetry-json" in response.text
     assert '<pre id="telemetry-json"></pre>' in response.text
     assert "app.js" in response.text
@@ -72,7 +75,9 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert response.headers["cache-control"] == "no-cache"
     assert "/control/start" in response.text, "dashboard JS must hit REST contract"
     assert "/control/reset" in response.text
+    assert "/config/forwarder/telemetry-fps" in response.text
     assert "/stream/events" in response.text
+    assert "state.telemetryHz" in response.text
     assert "preview-frame" in response.text
     assert "/preview/stream.mjpg" in response.text
     assert "requestFullscreen" in response.text
@@ -103,7 +108,7 @@ def test_dashboard_css_served(client: TestClient) -> None:
     assert "overflow: hidden" in response.text
     assert "min-height: 0" in response.text
     assert "order: -30" in response.text
-    assert "flex: 1 1 100%" in response.text
+    assert ".telemetry-rate-control" in response.text
 
 
 def test_preview_stream_m3u8_is_gone(client: TestClient) -> None:

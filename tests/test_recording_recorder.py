@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -218,7 +218,7 @@ def test_reconcile_finalizes_orphan_with_file(
     index.insert_active(
         recording_id="orphan1",
         path=str(active_file),
-        started_at=datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc),
+        started_at=datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC),
     )
     rec = Recorder(root_path=root, index=index, srt_port=8890, ffmpeg_path="/bin/true")
     reconciled = rec.reconcile_active_rows()
@@ -236,7 +236,7 @@ def test_reconcile_marks_orphan_error_if_file_missing(
     index.insert_active(
         recording_id="orphan2",
         path=str(root / "no" / "such" / "file.ts"),
-        started_at=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        started_at=datetime(2026, 4, 19, tzinfo=UTC),
     )
     rec = Recorder(root_path=root, index=index, srt_port=8890, ffmpeg_path="/bin/true")
     rec.reconcile_active_rows()

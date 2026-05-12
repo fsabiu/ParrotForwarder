@@ -8,6 +8,7 @@ def test_normalize_telemetry_groups_rich_snapshot() -> None:
         "timestamp": "2026-04-17T16:00:00Z",
         "sequence": 12,
         "battery_percent": 82,
+        "telemetry_hz": 30,
         "gps_fixed": False,
         "position_valid": False,
         "position_source": "default",
@@ -115,6 +116,8 @@ def test_normalize_telemetry_groups_rich_snapshot() -> None:
 
     assert normalized["gps_fix"] is False
     assert normalized["battery_percent"] == 82
+    assert normalized["telemetry_hz"] == 30
+    assert normalized["fps"] == 30
     assert normalized["position_valid"] is False
     assert normalized["position"] == {
         "valid": False,

@@ -9,6 +9,7 @@ const state = {
   previewAvailable: false,
   previewSuppressed: false,
   telemetryStale: true,
+  telemetryHz: 30,
 };
 
 const DASHBOARD_THEME_KEY = "parrotForwarder.theme";
@@ -20,6 +21,7 @@ const DESKTOP_LAYOUT_MEDIA_QUERY = "(min-width: 1101px)";
 
 let previewController = null;
 let telemetryLayoutObserver = null;
+let telemetrySocket = null;
 
 const TELEMETRY_FIELDS = [
   "battery",
@@ -423,6 +425,70 @@ async function refreshStatus() {
   }
 }
 
+function setTelemetryHzDisplay(hz, statusText = null) {
+  const value = Math.max(1, Math.min(100, Math.round(Number(hz) || 30)));
+  state.telemetryHz = value;
+  const input = el("telemetry-hz-input");
+  if (input) input.value = String(value);
+  setField("telemetry-hz-status", statusText || `${value} Hz`);
+}
+
+async function refreshConfig() {
+  try {
+    const response = await fetch("/config", { cache: "no-store" });
+    if (!response.ok) return;
+    const body = await response.json();
+    const hz = body.forwarder?.telemetry_fps;
+    if (isNumber(hz)) {
+      setTelemetryHzDisplay(hz);
+    }
+  } catch (err) {
+    console.warn("config fetch failed", err);
+  }
+}
+
+async function applyTelemetryHz() {
+  const input = el("telemetry-hz-input");
+  const hz = Math.round(Number(input?.value));
+  if (!Number.isInteger(hz) || hz < 1 || hz > 100) {
+    setField("telemetry-hz-status", "1..100 Hz");
+    return;
+  }
+
+  setField("telemetry-hz-status", "Applying...");
+  try {
+    const response = await fetch("/config/forwarder/telemetry-fps", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ telemetry_fps: hz }),
+    });
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({}));
+      setField("telemetry-hz-status", problem.title || response.statusText);
+      return;
+    }
+    const body = await response.json();
+    setTelemetryHzDisplay(body.telemetry_fps, `${body.telemetry_fps} Hz`);
+    appendLog(
+      body.restart_requested
+        ? `[config] telemetry ${body.telemetry_fps} Hz; worker reset requested`
+        : `[config] telemetry ${body.telemetry_fps} Hz`
+    );
+    connectTelemetryStream();
+    refreshStatus();
+  } catch (err) {
+    setField("telemetry-hz-status", "Update failed");
+    console.warn("telemetry hz update failed", err);
+  }
+}
+
+function wireTelemetryHzControl() {
+  el("btn-telemetry-hz-apply")?.addEventListener("click", applyTelemetryHz);
+  el("telemetry-hz-input")?.addEventListener("keydown", (evt) => {
+    if (evt.key === "Enter") applyTelemetryHz();
+  });
+}
+
 function tickTimers() {
   if (state.startedAt) {
     const seconds = Math.floor((Date.now() - state.startedAt) / 1000);
@@ -632,7 +698,14 @@ function renderTelemetry(payload, sampleTime) {
 }
 
 function connectTelemetryStream() {
-  const ws = new WebSocket(wsUrl("/stream/telemetry?rate=2"));
+  if (telemetrySocket) {
+    const previous = telemetrySocket;
+    telemetrySocket = null;
+    previous.close();
+  }
+  const rate = Math.max(1, Math.min(100, Math.round(Number(state.telemetryHz) || 30)));
+  const ws = new WebSocket(wsUrl(`/stream/telemetry?rate=${rate}`));
+  telemetrySocket = ws;
   ws.addEventListener("message", (evt) => {
     try {
       const frame = JSON.parse(evt.data);
@@ -644,6 +717,7 @@ function connectTelemetryStream() {
     }
   });
   ws.addEventListener("close", () => {
+    if (telemetrySocket !== ws) return;
     appendLog("[info] telemetry stream closed; reconnecting in 1 s");
     state.telemetryStale = true;
     state.previewSuppressed = true;
@@ -947,13 +1021,14 @@ el("btn-rec-refresh")?.addEventListener("click", () => {
 restoreTheme();
 wireThemeToggle();
 restoreRecInputs();
+wireTelemetryHzControl();
 
 clearTelemetry();
 refreshStatus();
 wirePreviewState();
 wireTelemetryJsonHeight();
 connectEventStream();
-connectTelemetryStream();
+refreshConfig().finally(() => connectTelemetryStream());
 refreshRecStatus();
 refreshRecList();
 refreshRecDisk();

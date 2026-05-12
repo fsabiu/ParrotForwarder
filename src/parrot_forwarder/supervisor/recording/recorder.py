@@ -32,10 +32,10 @@ import logging
 import os
 import signal
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from parrot_forwarder.supervisor.recording.index import (
     RecordingIndex,
@@ -155,7 +155,7 @@ class Recorder:
                 raise AlreadyRecordingError("another recording is already active")
 
             recording_id = _new_recording_id()
-            started_at = datetime.now(timezone.utc)
+            started_at = datetime.now(UTC)
             rel_path = _build_relative_path(
                 started_at=started_at,
                 mission_id=meta.mission_id,
@@ -195,7 +195,7 @@ class Recorder:
             # handled by the watchdog task.
             try:
                 await asyncio.wait_for(proc.wait(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # good, it's still running
             else:
                 stderr = b""
@@ -245,17 +245,17 @@ class Recorder:
                     pass
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning("ffmpeg did not exit after SIGINT; sending SIGTERM")
                     proc.terminate()
                     try:
                         await asyncio.wait_for(proc.wait(), timeout=3.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.error("ffmpeg still alive; SIGKILL")
                         proc.kill()
                         await proc.wait()
 
-            stopped_at = datetime.now(timezone.utc)
+            stopped_at = datetime.now(UTC)
             bytes_ = path.stat().st_size if path.exists() else 0
             sha = await asyncio.to_thread(_sha256_of, path) if path.exists() else ""
             duration_s = int((stopped_at - started_dt).total_seconds())
@@ -313,7 +313,7 @@ class Recorder:
             current_bytes = self._active_path.stat().st_size
         except OSError:
             pass
-        elapsed = (datetime.now(timezone.utc) - self._started_at_dt).total_seconds()
+        elapsed = (datetime.now(UTC) - self._started_at_dt).total_seconds()
         return {
             "active": True,
             "recording_id": self._active.recording_id,
@@ -347,7 +347,7 @@ class Recorder:
             path = Path(row.path)
             if path.exists() and path.stat().st_size > 0:
                 stopped_at = datetime.fromtimestamp(
-                    path.stat().st_mtime, tz=timezone.utc
+                    path.stat().st_mtime, tz=UTC
                 )
                 sha = _sha256_of(path)
                 self._index.finalize(
@@ -431,7 +431,7 @@ class Recorder:
         meta: RecordingMeta,
     ) -> None:
         sidecar = path.with_suffix(".meta.json")
-        payload = {
+        payload: dict[str, object] = {
             "recording_id": recording_id,
             "started_at": _iso(started_at),
             "stopped_at": None,
@@ -523,8 +523,8 @@ def _safe_segment(raw: str) -> str:
 
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _sha256_of(path: Path) -> str:

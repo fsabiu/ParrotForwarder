@@ -96,7 +96,7 @@ def test_defaults_when_no_layers_provided() -> None:
     assert cfg.drone.model == "anafi"
     assert cfg.forwarder.srt_port == 8890
     assert cfg.forwarder.klv_port == 12345
-    assert cfg.forwarder.telemetry_fps == 10
+    assert cfg.forwarder.telemetry_fps == 30
     assert cfg.supervisor.http.bind == "127.0.0.1"
     assert cfg.supervisor.http.port == 8080
     assert cfg.supervisor.auto_start is True

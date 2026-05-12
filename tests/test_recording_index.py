@@ -16,7 +16,7 @@ Covered behaviours:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,7 @@ from parrot_forwarder.supervisor.recording.index import (
 
 
 def _mkdt(offset_s: int = 0) -> datetime:
-    return datetime(2026, 4, 19, 12, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=offset_s)
+    return datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC) + timedelta(seconds=offset_s)
 
 
 @pytest.fixture()

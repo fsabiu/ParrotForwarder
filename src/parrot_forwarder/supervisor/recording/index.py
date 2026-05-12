@@ -22,7 +22,7 @@ import sqlite3
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -95,7 +95,7 @@ class RecordingIndex:
         self._conn: sqlite3.Connection | None = None
 
     @classmethod
-    def open(cls, db_path: Path) -> "RecordingIndex":
+    def open(cls, db_path: Path) -> RecordingIndex:
         idx = cls(db_path)
         idx._connect()
         return idx
@@ -285,7 +285,7 @@ class RecordingIndex:
                 return None
             return _parse_iso(row["started_at"])
 
-    def _cursor(self) -> "_CursorCtx":
+    def _cursor(self) -> _CursorCtx:
         return _CursorCtx(self)
 
 
@@ -328,8 +328,8 @@ def _row(r: sqlite3.Row) -> RecordingRow:
 
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _parse_iso(s: str) -> datetime:

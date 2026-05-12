@@ -110,6 +110,12 @@
         <dt>Satellites</dt><dd id="satellites">-</dd>
         <dt>RSSI</dt><dd id="rssi">-</dd>
         <dt>FPS</dt><dd id="fps">-</dd>
+        <dt>Telemetry Hz</dt>
+        <dd class="telemetry-rate-control">
+          <input id="telemetry-hz-input" type="number" min="1" max="100" step="1" value="30" />
+          <button id="btn-telemetry-hz-apply" type="button">Apply</button>
+          <span id="telemetry-hz-status">30 Hz</span>
+        </dd>
         <dt>Position valid</dt><dd id="position-valid">-</dd>
         <dt>Flight state</dt><dd id="flying-state">-</dd>
       </dl>

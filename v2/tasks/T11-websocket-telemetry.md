@@ -11,7 +11,7 @@ Real-time streams for state events and telemetry, both WebSocket.
 ## Acceptance criteria
 
 - `/stream/events` emits state transitions, logs (warning+), and restart notifications.
-- `/stream/telemetry` emits decoded telemetry at `?rate=<hz>` (default 10, max = drone rate).
+- `/stream/telemetry` emits decoded telemetry at `?rate=<hz>` (default 30, max = configured drone rate).
 - Per-client rate limiting; slow consumers get backpressure, then disconnect.
 - Graceful close on supervisor shutdown.
 

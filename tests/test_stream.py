@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from parrot_forwarder.supervisor.api.stream import (
     Broadcaster,
+    _configured_telemetry_rate_hz,
     publish_log,
     publish_restart,
     publish_state_transition,
@@ -96,6 +97,21 @@ def test_telemetry_rate_is_validated(
     with pytest.raises((_WSD, Exception)):  # noqa: B017
         with client.websocket_connect("/stream/telemetry?rate=0"):
             pass
+
+
+def test_default_telemetry_rate_reads_current_app_config() -> None:
+    class _Forwarder:
+        telemetry_fps = 42
+
+    class _Config:
+        forwarder = _Forwarder()
+
+    app = FastAPI()
+    app.state.config = _Config()
+
+    assert (
+        _configured_telemetry_rate_hz(app, default_rate_hz=30, max_rate_hz=100) == 42
+    )
 
 
 async def test_broadcaster_drops_slow_subscriber() -> None:

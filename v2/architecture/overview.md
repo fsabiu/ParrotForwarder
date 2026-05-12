@@ -106,7 +106,7 @@ Transitions, timeouts, and backoff in [state-machine.md](state-machine.md).
 
 ## Data flow
 
-- **Telemetry**: Olympe callback -> KLV encoder -> UDP `:12345` (unchanged from v1). Also published to the supervisor over IPC, which fans out to WebSocket subscribers at a rate-limited 10 Hz.
+- **Telemetry**: Olympe callback/state cache -> KLV encoder -> UDP `:12345` (unchanged from v1). Also published to the supervisor over IPC, which fans out to WebSocket subscribers at the configured telemetry rate, 30 Hz by default.
 - **Video main**: RTSP from drone -> GStreamer mux (video + KLV) -> SRT `:8890` (unchanged).
 - **Video preview**: GStreamer `tee` branch -> low-bitrate transcode -> HLS segments served from supervisor's HTTP server at `/preview/stream.m3u8`. Main stream is untouched.
 

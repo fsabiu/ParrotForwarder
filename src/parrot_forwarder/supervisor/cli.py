@@ -145,6 +145,33 @@ def _load_runtime_config(args: argparse.Namespace) -> Config:
     )
 
 
+def _with_telemetry_fps(config: Config, telemetry_fps: int) -> Config:
+    return config.model_copy(
+        update={
+            "forwarder": config.forwarder.model_copy(
+                update={"telemetry_fps": telemetry_fps}
+            )
+        }
+    )
+
+
+def _worker_process_config_from(config: Config, backend: str) -> WorkerProcessConfig:
+    return WorkerProcessConfig(
+        backend="real" if backend == "subprocess" else "mock",
+        drone_ip=config.drone.ip,
+        video_ip=config.drone.video_ip,
+        device_kind=config.drone.device_kind,
+        telemetry_fps=config.forwarder.telemetry_fps,
+        video_fps=config.forwarder.video_fps,
+        srt_port=config.forwarder.srt_port,
+        klv_port=config.forwarder.klv_port,
+        heartbeat_interval=config.supervisor.heartbeat.interval_seconds,
+        video_stats_interval=30,
+        connect_retry_interval=max(1.0, config.supervisor.heartbeat.interval_seconds),
+        log_level=config.logging.level,
+    )
+
+
 def _build_message_handler(
     supervisor: Supervisor,
     *,
@@ -183,6 +210,8 @@ async def _amain(args: argparse.Namespace) -> int:
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
+
+    current_config = cfg
 
     configure_logging(
         LoggingConfig(
@@ -224,27 +253,13 @@ async def _amain(args: argparse.Namespace) -> int:
             telemetry=telemetry,
             health=health,
         )
-        process_config = WorkerProcessConfig(
-            backend="real" if backend == "subprocess" else "mock",
-            drone_ip=cfg.drone.ip,
-            video_ip=cfg.drone.video_ip,
-            device_kind=cfg.drone.device_kind,
-            telemetry_fps=cfg.forwarder.telemetry_fps,
-            video_fps=cfg.forwarder.video_fps,
-            srt_port=cfg.forwarder.srt_port,
-            klv_port=cfg.forwarder.klv_port,
-            heartbeat_interval=cfg.supervisor.heartbeat.interval_seconds,
-            video_stats_interval=30,
-            connect_retry_interval=max(1.0, cfg.supervisor.heartbeat.interval_seconds),
-            log_level=cfg.logging.level,
-        )
-        subprocess_factory = build_subprocess_worker_factory(
-            process_config,
-            on_message=on_message,
-        )
 
         async def _worker_factory(sup: Supervisor) -> WorkerHandle:
             health.reset()
+            subprocess_factory = build_subprocess_worker_factory(
+                _worker_process_config_from(current_config, backend),
+                on_message=on_message,
+            )
             return await subprocess_factory(sup)
 
         supervisor.worker_factory = _worker_factory
@@ -292,14 +307,27 @@ async def _amain(args: argparse.Namespace) -> int:
                     "reconciled %d orphan recording row(s) at startup", len(reconciled)
                 )
 
+    def _set_telemetry_fps(telemetry_fps: int) -> Config:
+        nonlocal current_config
+        current_config = _with_telemetry_fps(current_config, telemetry_fps)
+        logger.info("runtime telemetry_fps updated to %s Hz", telemetry_fps)
+        return current_config
+
     app = create_app(
         supervisor,
-        config=cfg,
+        config=current_config,
+        set_telemetry_fps=_set_telemetry_fps,
         recorder=recorder,
         recording_index=recording_index,
         recordings_root=recordings_root,
     )
-    register_stream_routes(app, events=events, telemetry=telemetry)
+    register_stream_routes(
+        app,
+        events=events,
+        telemetry=telemetry,
+        default_telemetry_rate_hz=current_config.forwarder.telemetry_fps,
+        max_telemetry_rate_hz=100,
+    )
 
     config = uvicorn.Config(
         app,

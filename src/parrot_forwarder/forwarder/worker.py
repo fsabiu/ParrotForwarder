@@ -37,6 +37,7 @@ async def _run_runtime_loop(
     send: _Sender,
     stop_event: asyncio.Event,
     heartbeat_interval: float,
+    telemetry_fps: int,
 ) -> int:
     try:
         try:
@@ -56,43 +57,59 @@ async def _run_runtime_loop(
 
         seq = 0
         pipeline_started = False
+        telemetry_interval = 1.0 / max(1, telemetry_fps)
+        loop = asyncio.get_running_loop()
+        next_telemetry_at = loop.time()
+        next_heartbeat_at = loop.time()
+        latest_snapshot: dict[str, object] = {}
         while not stop_event.is_set():
+            now = loop.time()
+            sleep_for = max(0.0, min(next_telemetry_at, next_heartbeat_at) - now)
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=heartbeat_interval)
+                await asyncio.wait_for(stop_event.wait(), timeout=sleep_for)
                 break
             except TimeoutError:
                 pass
 
-            if not runtime.is_connected():
-                await send(ipc_module.OlympeDisconnectedMsg(reason="connection_lost"))
-                return 1
+            now = loop.time()
 
-            pipeline_running = runtime.is_pipeline_running()
-            if pipeline_running and not pipeline_started:
-                await send(ipc_module.PipelineStartedMsg())
-                pipeline_started = True
-            elif not pipeline_running and pipeline_started:
-                await send(ipc_module.PipelineErrorMsg(reason="video_unavailable"))
-                pipeline_started = False
+            if now >= next_telemetry_at:
+                snapshot = runtime.telemetry_snapshot()
+                if snapshot:
+                    latest_snapshot = snapshot
+                    timestamp = snapshot.get("timestamp")
+                    await send(
+                        ipc_module.TelemetryMsg(
+                            t=timestamp if isinstance(timestamp, str) else _utc_now_iso(),
+                            payload=snapshot,
+                        )
+                    )
+                while next_telemetry_at <= now:
+                    next_telemetry_at += telemetry_interval
 
-            snapshot = runtime.telemetry_snapshot()
-            if snapshot:
-                timestamp = snapshot.get("timestamp")
+            if now >= next_heartbeat_at:
+                if not runtime.is_connected():
+                    await send(ipc_module.OlympeDisconnectedMsg(reason="connection_lost"))
+                    return 1
+
+                pipeline_running = runtime.is_pipeline_running()
+                if pipeline_running and not pipeline_started:
+                    await send(ipc_module.PipelineStartedMsg())
+                    pipeline_started = True
+                elif not pipeline_running and pipeline_started:
+                    await send(ipc_module.PipelineErrorMsg(reason="video_unavailable"))
+                    pipeline_started = False
+
+                seq += 1
                 await send(
-                    ipc_module.TelemetryMsg(
-                        t=timestamp if isinstance(timestamp, str) else _utc_now_iso(),
-                        payload=snapshot,
+                    ipc_module.HeartbeatMsg(
+                        seq=seq,
+                        healthy=True,
+                        metrics=runtime.heartbeat_metrics(latest_snapshot),
                     )
                 )
-
-            seq += 1
-            await send(
-                ipc_module.HeartbeatMsg(
-                    seq=seq,
-                    healthy=True,
-                    metrics=runtime.heartbeat_metrics(snapshot),
-                )
-            )
+                while next_heartbeat_at <= now:
+                    next_heartbeat_at += heartbeat_interval
     except Exception as exc:  # noqa: BLE001
         logger.exception("worker runtime loop raised")
         await send(ipc_module.PipelineErrorMsg(reason=str(exc)))
@@ -157,6 +174,7 @@ async def _worker_main(
             send=_send,
             stop_event=stop_event,
             heartbeat_interval=heartbeat_interval,
+            telemetry_fps=runtime_config.telemetry_fps,
         )
     finally:
         reader_task.cancel()
@@ -191,7 +209,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         choices=("drone", "skycontroller"),
         default="drone",
     )
-    parser.add_argument("--telemetry-fps", type=int, default=10)
+    parser.add_argument("--telemetry-fps", type=int, default=30)
     parser.add_argument("--video-fps", type=int, default=30)
     parser.add_argument("--srt-port", type=int, default=8890)
     parser.add_argument("--klv-port", type=int, default=12345)

@@ -8,7 +8,7 @@
 4. **Observability** - structured JSON logs with rotation, Prometheus-style metrics, and enough session history to diagnose a 1 am outage without an SSH session.
 5. **Testability without a drone** - mock Olympe backend, fake GStreamer pipeline, and an in-process SRT receiver fixture so unit and integration tests run in CI without hardware.
 6. **Reproducible install** - one command (`make install` / `./scripts/install.sh`) or one compose command (`docker compose up -d --build`) brings a fresh Ubuntu 24.04 ARM64 host from empty to running service; no copy-paste from README. Docker on the Ubuntu VM is the authoritative deployment path for demos and customer-facing runs.
-7. **Truthful, complete telemetry** - publish every practically extractable Olympe field needed by the current geolocation/COP pipeline: raw GPS validity + accuracies, home/RTH state, absolute and relative gimbal attitude, gimbal and camera offsets, zoom/FOV/focal data, link quality, storage, product/version, and motor-flight stats.
+7. **Truthful, complete telemetry** - publish every practically extractable Olympe field needed by the current geolocation/COP pipeline: raw GPS validity + accuracies, home/RTH state, absolute and relative gimbal attitude, gimbal and camera offsets, zoom/FOV/focal data, link quality, storage, product/version, motor-flight stats, and a sanitized raw SDK state cache for completeness evidence.
 
 ## Non-goals (v2)
 
@@ -45,7 +45,7 @@
 | Config | 9 CLI flags | `config.yaml` (default `/etc/parrot-forwarder/config.yaml`), CLI flags override |
 | Logs | Plain text to stdout / journald | Structured JSON to file (rotating) + stdout; log level per module |
 | Control | SIGTERM only | REST API: `POST /control/start`, `/control/stop`, `/control/reset`; WebSocket `/stream/events` |
-| Telemetry access | None outside SRT | WebSocket `/stream/telemetry` at configurable rate with grouped payload + raw snapshot |
+| Telemetry access | None outside SRT | SRT/KLV and WebSocket `/stream/telemetry` at configurable rate, 30 Hz by default, with grouped payload + raw snapshot + SDK state cache evidence |
 | Video preview | None (need external SRT client) | HLS/WebRTC preview in dashboard, fed from same pipeline (tee branch) |
 | Metrics | None | Prometheus `/metrics` endpoint (FPS, bitrate, uptime, reconnects, drone RSSI, battery %) |
 | Tests | 7 scripts all requiring live drone | pytest suite with mock drone; `--live` marker for hardware tests |

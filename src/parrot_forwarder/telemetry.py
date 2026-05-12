@@ -17,6 +17,7 @@ import math
 import socket
 import threading
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -67,6 +68,7 @@ from .klv_encoder import encode_telemetry_to_klv
 DEFAULT_LATITUDE = 36.71549027372183
 DEFAULT_LONGITUDE = -4.287949979844388
 DEFAULT_ALTITUDE_MSL_M = 10.0
+_MISSING = object()
 
 
 def _utc_now_iso() -> str:
@@ -144,6 +146,35 @@ def _camera_fov_degrees(
     return h_fov, v_fov
 
 
+def _sdk_message_name(message: object) -> str:
+    name = getattr(message, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return str(message)
+
+
+def _jsonable(value: object) -> object:
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+
+    enum_name = getattr(value, "name", None)
+    if isinstance(enum_name, str) and enum_name:
+        return enum_name
+
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_jsonable(item) for item in value]
+
+    enum_value = getattr(value, "value", _MISSING)
+    if isinstance(enum_value, (str, int, float, bool)) or enum_value is None:
+        return enum_value
+
+    return str(value)
+
+
 
 class TelemetryForwarder(threading.Thread):
     """
@@ -152,7 +183,7 @@ class TelemetryForwarder(threading.Thread):
     Forwards telemetry as KLV (MISB 0601) over UDP to localhost for FFmpeg to consume.
     """
     
-    def __init__(self, drone, fps=10, klv_port=12345, name="TelemetryForwarder"):
+    def __init__(self, drone, fps=30, klv_port=12345, name="TelemetryForwarder"):
         """
         Initialize the telemetry forwarder.
         
@@ -248,6 +279,37 @@ class TelemetryForwarder(threading.Thread):
         entry = self._sticky.get(key)
         return entry[0] if entry else None
 
+    def _sticky_snapshot(self) -> dict[str, object] | None:
+        if not self._sticky:
+            return None
+        return {
+            key: {
+                "updated_at": timestamp,
+                "payload": _jsonable(payload),
+            }
+            for key, (timestamp, payload) in sorted(self._sticky.items())
+        }
+
+    def _sdk_state_snapshot(self) -> dict[str, object] | None:
+        query_state = getattr(self.drone, "query_state", None)
+        if not callable(query_state):
+            return None
+        try:
+            state = query_state("")
+        except Exception as exc:
+            self.logger.debug("query_state('') failed: %s", exc)
+            return None
+        if not isinstance(state, Mapping):
+            return None
+
+        sanitized: dict[str, object] = {}
+        for message, payload in sorted(
+            state.items(),
+            key=lambda item: _sdk_message_name(item[0]),
+        ):
+            sanitized[_sdk_message_name(message)] = _jsonable(payload)
+        return sanitized or None
+
     def _safe_get_state(self, message: Any) -> dict[str, Any] | None:
         try:
             state = self.drone.get_state(message)
@@ -273,7 +335,17 @@ class TelemetryForwarder(threading.Thread):
         telemetry = {
             "timestamp": _utc_now_iso(),
             "sequence": self.telemetry_count,
+            "telemetry_hz": self.fps,
+            "telemetry_target_hz": self.fps,
         }
+        sdk_state = self._sdk_state_snapshot()
+        if sdk_state:
+            telemetry["olympe_state"] = sdk_state
+            telemetry["olympe_state_count"] = len(sdk_state)
+
+        sticky_state = self._sticky_snapshot()
+        if sticky_state:
+            telemetry["olympe_event_state"] = sticky_state
 
         battery = self._safe_get_state(BatteryStateChanged)
         if battery:
