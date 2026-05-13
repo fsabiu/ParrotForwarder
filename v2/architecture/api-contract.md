@@ -52,6 +52,9 @@ Full current state snapshot.
 ### `GET /config`
 
 Effective config after layering (defaults < yaml < env < cli), with secrets redacted. Useful for debugging.
+The `field` object carries advertised dashboard/SRT/Tailscale endpoint metadata
+for operators and detector handoff checks; it does not change listen/bind
+behavior.
 
 ### `PUT /config/forwarder/telemetry-fps`
 

@@ -45,6 +45,8 @@ For v2 operations, run `parrot-forwarder-supervisor` on the host or
 uses host networking and can expose the dashboard on `http://<machine-ip>:8080/`
 and the SRT stream on `srt://<machine-ip>:8890`, while the default bare-metal
 config keeps the dashboard on `http://localhost:8080/`.
+For Tailscale field validation prep, use `field.env.example` with
+`docs/FIELD_VALIDATION.md` and `scripts/field_check.sh`.
 
 Common LAN examples:
 - Dashboard by IP: `http://192.168.1.134:8080/`

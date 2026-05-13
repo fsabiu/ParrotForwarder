@@ -111,6 +111,8 @@ async def test_config_endpoint_returns_effective_config_when_attached(
     body = response.json()
     assert body["forwarder"]["telemetry_fps"] == 30
     assert body["supervisor"]["http"]["port"] == 8080
+    assert body["field"]["dashboard_scheme"] == "http"
+    assert body["field"]["tailscale_host"] is None
 
 
 async def test_update_telemetry_fps_updates_runtime_config(
