@@ -63,10 +63,10 @@ from olympe.messages.gimbal import attitude as GimbalAttitude, offsets as Gimbal
 from olympe.messages.wifi import rssi_changed as WifiRssiChanged
 
 from .klv_encoder import encode_telemetry_to_klv
+from .sanitize import jsonable as _jsonable
 
 
 UNKNOWN_SOURCE_ID = "parrot_anafi_unknown"
-_MISSING = object()
 
 
 def _utc_now_iso() -> str:
@@ -164,29 +164,6 @@ def _sdk_message_name(message: object) -> str:
     if isinstance(name, str) and name:
         return name
     return str(message)
-
-
-def _jsonable(value: object) -> object:
-    if value is None or isinstance(value, (str, int, bool)):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-
-    enum_name = getattr(value, "name", None)
-    if isinstance(enum_name, str) and enum_name:
-        return enum_name
-
-    if isinstance(value, Mapping):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_jsonable(item) for item in value]
-
-    enum_value = getattr(value, "value", _MISSING)
-    if isinstance(enum_value, (str, int, float, bool)) or enum_value is None:
-        return enum_value
-
-    return str(value)
-
 
 
 class TelemetryForwarder(threading.Thread):
