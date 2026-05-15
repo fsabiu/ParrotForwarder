@@ -79,7 +79,12 @@ class Metrics:
         # Pipeline metrics sourced from heartbeat ``metrics`` payloads.
         self.pipeline_fps = Gauge(
             f"{PREFIX}pipeline_fps",
-            "Current video pipeline frames per second.",
+            "Measured video pipeline frames per second when available.",
+            registry=self.registry,
+        )
+        self.video_target_fps = Gauge(
+            f"{PREFIX}video_target_fps",
+            "Configured video target cadence in frames per second.",
             registry=self.registry,
         )
         self.pipeline_bitrate_kbps = Gauge(
@@ -158,7 +163,9 @@ class Metrics:
     ) -> None:
         self.heartbeat_lag_seconds.set(lag_seconds)
         for source_key, gauge in (
+            ("video_measured_fps", self.pipeline_fps),
             ("fps", self.pipeline_fps),
+            ("video_target_fps", self.video_target_fps),
             ("bitrate_kbps", self.pipeline_bitrate_kbps),
             ("battery_percent", self.battery_percent),
             ("rssi_dbm", self.rssi_dbm),

@@ -24,6 +24,7 @@ def test_default_metric_names_are_prefixed_and_have_help() -> None:
         "parrot_forwarder_restarts_total",
         "parrot_forwarder_heartbeat_lag_seconds",
         "parrot_forwarder_pipeline_fps",
+        "parrot_forwarder_video_target_fps",
         "parrot_forwarder_telemetry_actual_hz",
         "parrot_forwarder_klv_packets_sent",
         "parrot_forwarder_srt_streaming",
@@ -60,7 +61,8 @@ def test_record_heartbeat_sets_pipeline_metrics() -> None:
     metrics.record_heartbeat(
         lag_seconds=0.5,
         pipeline_metrics={
-            "fps": 29.97,
+            "video_measured_fps": 29.97,
+            "video_target_fps": 30,
             "bitrate_kbps": 3200,
             "battery_percent": 82,
             "rssi_dbm": -60,
@@ -73,6 +75,7 @@ def test_record_heartbeat_sets_pipeline_metrics() -> None:
     body = generate_latest(metrics.registry).decode("utf-8")
     assert "parrot_forwarder_heartbeat_lag_seconds 0.5" in body
     assert "parrot_forwarder_pipeline_fps 29.97" in body
+    assert "parrot_forwarder_video_target_fps 30.0" in body
     assert "parrot_forwarder_pipeline_bitrate_kbps 3200.0" in body
     assert "parrot_forwarder_battery_percent 82.0" in body
     assert "parrot_forwarder_rssi_dbm -60.0" in body
@@ -84,8 +87,8 @@ def test_record_heartbeat_sets_pipeline_metrics() -> None:
 
 def test_heartbeat_ignores_missing_keys() -> None:
     metrics = Metrics()
-    # Only sets fps; other gauges must stay at their default of 0.
-    metrics.record_heartbeat(lag_seconds=0.1, pipeline_metrics={"fps": 15.0})
+    # Only sets measured video FPS; other gauges must stay at their default of 0.
+    metrics.record_heartbeat(lag_seconds=0.1, pipeline_metrics={"video_measured_fps": 15.0})
     body = generate_latest(metrics.registry).decode("utf-8")
     assert "parrot_forwarder_pipeline_fps 15.0" in body
     assert "parrot_forwarder_battery_percent 0.0" in body

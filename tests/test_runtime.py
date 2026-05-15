@@ -121,7 +121,8 @@ def test_normalize_telemetry_groups_rich_snapshot() -> None:
     assert normalized["source_name"] == "Anafi"
     assert normalized["battery_percent"] == 82
     assert normalized["telemetry_hz"] == 30
-    assert normalized["fps"] == 30
+    assert normalized["telemetry_target_hz"] == 30
+    assert "fps" not in normalized
     assert normalized["position_valid"] is False
     assert normalized["position"] == {
         "valid": False,

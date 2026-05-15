@@ -116,7 +116,7 @@ class VideoForwarder(threading.Thread):
             f"rtspsrc location={drone_rtsp_url} protocols=udp latency=50 ! "
             "application/x-rtp,media=video,encoding-name=H264 ! "
             "rtph264depay ! "
-            "h264parse ! "
+            "h264parse config-interval=1 ! "
             "video/x-h264,stream-format=byte-stream,alignment=au ! "
             "queue max-size-time=200000000 leaky=downstream ! "  # 200ms buffer
             "mux. "
@@ -155,11 +155,11 @@ class VideoForwarder(threading.Thread):
             f"rtspsrc location={drone_rtsp_url} protocols=udp latency=300 buffer-mode=auto retry=5 timeout=5000000 ! "
             "application/x-rtp,media=video,encoding-name=H264 ! "
             
-            # RTP depayloader
+            # RTP depayloader.
             "rtph264depay ! "
             
-            # H.264 parser with periodic config resend for recovery
-            "h264parse config-interval=-1 ! "
+            # H.264 parser with periodic SPS/PPS resend for late SRT joiners.
+            "h264parse config-interval=1 ! "
             "video/x-h264,stream-format=byte-stream,alignment=au ! "
             
             # Large video queue - 500ms buffer
