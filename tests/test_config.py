@@ -76,6 +76,13 @@ def yaml_file(tmp_path: Path) -> Path:
         metrics:
           enabled: false
           path: "/prom"
+        field:
+          dashboard_scheme: "https"
+          tailscale_host: "field-node.example.ts.net"
+          advertised_dashboard_host: "dashboard.example.ts.net"
+          advertised_dashboard_port: 8443
+          advertised_srt_host: "srt.example.ts.net"
+          advertised_srt_port: 8891
         """
     ).strip()
     path = tmp_path / "config.yaml"
@@ -108,6 +115,12 @@ def test_defaults_when_no_layers_provided() -> None:
     assert cfg.recording.auto_on_takeoff is False
     assert cfg.recording.max_bytes_per_file == 10 * 1024 * 1024 * 1024
     assert cfg.recording.retention_days == 90
+    assert cfg.field.dashboard_scheme == "http"
+    assert cfg.field.tailscale_host is None
+    assert cfg.field.advertised_dashboard_host is None
+    assert cfg.field.advertised_dashboard_port is None
+    assert cfg.field.advertised_srt_host is None
+    assert cfg.field.advertised_srt_port is None
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +145,12 @@ def test_valid_yaml_maps_to_model(yaml_file: Path) -> None:
     assert cfg.preview.bitrate_kbps == 1200
     assert cfg.metrics.enabled is False
     assert cfg.metrics.path == "/prom"
+    assert cfg.field.dashboard_scheme == "https"
+    assert cfg.field.tailscale_host == "field-node.example.ts.net"
+    assert cfg.field.advertised_dashboard_host == "dashboard.example.ts.net"
+    assert cfg.field.advertised_dashboard_port == 8443
+    assert cfg.field.advertised_srt_host == "srt.example.ts.net"
+    assert cfg.field.advertised_srt_port == 8891
 
 
 def test_empty_yaml_is_equivalent_to_defaults(tmp_path: Path) -> None:
@@ -174,6 +193,40 @@ def test_env_coerces_booleans_and_ints() -> None:
     assert cfg.supervisor.auto_start is False
     assert cfg.forwarder.srt_port == 9999
     assert cfg.supervisor.backoff.base_seconds == 0.5
+
+
+def test_env_configures_field_endpoint_metadata() -> None:
+    env = {
+        "PARROT_FORWARDER_FIELD__DASHBOARD_SCHEME": "https",
+        "PARROT_FORWARDER_FIELD__TAILSCALE_HOST": "field-node.example.ts.net",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_DASHBOARD_HOST": "dashboard.example.ts.net",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_DASHBOARD_PORT": "8443",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_SRT_HOST": "srt.example.ts.net",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_SRT_PORT": "8891",
+    }
+    cfg = load_config(env=env)
+    assert cfg.field.dashboard_scheme == "https"
+    assert cfg.field.tailscale_host == "field-node.example.ts.net"
+    assert cfg.field.advertised_dashboard_host == "dashboard.example.ts.net"
+    assert cfg.field.advertised_dashboard_port == 8443
+    assert cfg.field.advertised_srt_host == "srt.example.ts.net"
+    assert cfg.field.advertised_srt_port == 8891
+
+
+def test_empty_field_env_values_become_unset_metadata() -> None:
+    env = {
+        "PARROT_FORWARDER_FIELD__TAILSCALE_HOST": "",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_DASHBOARD_HOST": "",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_DASHBOARD_PORT": "",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_SRT_HOST": "",
+        "PARROT_FORWARDER_FIELD__ADVERTISED_SRT_PORT": "",
+    }
+    cfg = load_config(env=env)
+    assert cfg.field.tailscale_host is None
+    assert cfg.field.advertised_dashboard_host is None
+    assert cfg.field.advertised_dashboard_port is None
+    assert cfg.field.advertised_srt_host is None
+    assert cfg.field.advertised_srt_port is None
 
 
 def test_env_malformed_path_rejected() -> None:
@@ -239,6 +292,12 @@ def test_out_of_range_port_rejected() -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config(cli_overrides={"supervisor": {"http": {"port": 0}}})
     assert "supervisor.http.port" in str(excinfo.value)
+
+
+def test_out_of_range_field_advertised_port_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cli_overrides={"field": {"advertised_srt_port": 0}})
+    assert "field.advertised_srt_port" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------

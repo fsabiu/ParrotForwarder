@@ -215,6 +215,46 @@ class RecordingConfig(BaseModel):
     )
 
 
+class FieldConfig(BaseModel):
+    """Operator-facing endpoint metadata for field validation.
+
+    These values do not change bind/listen behavior. They document the host
+    names or Tailscale names operators and downstream consumers should use
+    when validating the dashboard and SRT handoff from outside the container.
+    """
+
+    model_config = _STRICT
+
+    dashboard_scheme: Literal["http", "https"] = Field(
+        default="http",
+        description="Scheme used in the operator-facing dashboard URL",
+    )
+    tailscale_host: str | None = Field(
+        default=None,
+        description="Tailscale DNS name or Tailscale IP for the field node",
+    )
+    advertised_dashboard_host: str | None = Field(
+        default=None,
+        description="Host clients should use for the dashboard; falls back to tailscale_host",
+    )
+    advertised_dashboard_port: int | None = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description="External dashboard port if different from supervisor.http.port",
+    )
+    advertised_srt_host: str | None = Field(
+        default=None,
+        description="Host detector/SRT clients should use; falls back to tailscale_host",
+    )
+    advertised_srt_port: int | None = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description="External SRT port if different from forwarder.srt_port",
+    )
+
+
 class Config(BaseModel):
     """Top-level ParrotForwarder v2 configuration.
 
@@ -231,6 +271,7 @@ class Config(BaseModel):
     preview: PreviewConfig = Field(default_factory=PreviewConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     recording: RecordingConfig = Field(default_factory=RecordingConfig)
+    field: FieldConfig = Field(default_factory=FieldConfig)
 
 
 # ---------------------------------------------------------------------------

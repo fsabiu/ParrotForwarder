@@ -57,6 +57,14 @@ preview:
 metrics:
   enabled: true
   path: "/metrics"
+
+field:
+  dashboard_scheme: "http"         # http|https for advertised dashboard URL
+  tailscale_host: null             # Tailscale DNS name or Tailscale IP
+  advertised_dashboard_host: null  # optional host override for operators
+  advertised_dashboard_port: null  # optional external dashboard port
+  advertised_srt_host: null        # optional host override for detector/SRT clients
+  advertised_srt_port: null        # optional external SRT port
 ```
 
 ## Environment variables
@@ -64,8 +72,13 @@ metrics:
 Each field maps to `PARROT_FORWARDER_<upper_snake_path>`. Example:
 
 - `PARROT_FORWARDER_SUPERVISOR__HTTP__PORT=9090`
+- `PARROT_FORWARDER_FIELD__TAILSCALE_HOST=<tailscale-host-or-ip>`
 
 Double underscore separates nested keys.
+
+The `field` section is operator metadata only. It reports which host/port
+clients should use over the site network or Tailscale; it does not change
+`supervisor.http.*` bind behavior or `forwarder.srt_port` listen behavior.
 
 ## CLI flags
 

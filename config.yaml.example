@@ -56,3 +56,11 @@ recording:
   auto_on_takeoff: false           # start/stop recording with takeoff/landing
   max_bytes_per_file: 10737418240  # safety cap per file (10 GiB)
   retention_days: 90               # 0 disables retention
+
+field:
+  dashboard_scheme: "http"         # http|https for the operator-facing dashboard URL
+  tailscale_host: null             # Tailscale DNS name or Tailscale IP for the field node
+  advertised_dashboard_host: null  # optional dashboard host override; otherwise use tailscale_host
+  advertised_dashboard_port: null  # optional external dashboard port; otherwise supervisor.http.port
+  advertised_srt_host: null        # optional SRT host override; otherwise use tailscale_host
+  advertised_srt_port: null        # optional external SRT port; otherwise forwarder.srt_port

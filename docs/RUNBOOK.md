@@ -50,6 +50,8 @@ Logs are rotating JSON at the path in `config.yaml` (`/var/log/parrot-forwarder/
 
 This is the preferred path when you want the service reachable directly on the
 machine's LAN IP instead of a host-local tunnel or VM port-forward.
+For the WP-03 (Parrot) Tailscale field checklist, use
+[FIELD_VALIDATION.md](FIELD_VALIDATION.md).
 
 ```bash
 cd ParrotForwarder
