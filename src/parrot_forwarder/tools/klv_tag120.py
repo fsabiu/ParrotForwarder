@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from typing import Any
 
 from parrot_forwarder.klv_encoder import MISB0601Encoder
+
+_MISB_0601_KEY = MISB0601Encoder.MISB_0601_KEY
+_FFMPEG_KLV_KEY_SUFFIX = _MISB_0601_KEY[10:]
 
 
 class KlvParseError(ValueError):
@@ -32,7 +36,7 @@ def parse_ber_length(data: bytes, offset: int) -> tuple[int, int]:
     return int.from_bytes(data[offset:end], byteorder="big"), end
 
 
-def _iter_local_set_items(packet: bytes) -> list[tuple[int, bytes]]:
+def iter_local_set_items(packet: bytes) -> list[tuple[int, bytes]]:
     if not packet.startswith(MISB0601Encoder.MISB_0601_KEY):
         raise KlvParseError("packet does not start with MISB 0601 universal key")
 
@@ -55,36 +59,129 @@ def _iter_local_set_items(packet: bytes) -> list[tuple[int, bytes]]:
     return items
 
 
-def extract_tag120_json(data: bytes) -> dict[str, Any] | None:
-    """Return the first decoded tag 120 JSON payload found in ``data``."""
-    key = MISB0601Encoder.MISB_0601_KEY
-    start = data.find(key)
+def _find_next_packet_start(data: bytes, offset: int) -> tuple[int, bool]:
+    full_start = data.find(_MISB_0601_KEY, offset)
+    suffix_start = data.find(_FFMPEG_KLV_KEY_SUFFIX, offset)
+    candidates = [
+        (start, False)
+        for start in (full_start,)
+        if start != -1
+    ] + [
+        (start, True)
+        for start in (suffix_start,)
+        if start != -1
+    ]
+    if not candidates:
+        return -1, False
+    return min(candidates, key=lambda candidate: candidate[0])
+
+
+def _read_misb0601_packet(data: bytes, start: int, *, ffmpeg_stripped: bool) -> tuple[bytes, int]:
+    key_length = len(_FFMPEG_KLV_KEY_SUFFIX) if ffmpeg_stripped else len(_MISB_0601_KEY)
+    offset = start + key_length
+    value_length, value_offset = parse_ber_length(data, offset)
+    end = value_offset + value_length
+    if end > len(data):
+        raise KlvParseError("truncated MISB 0601 local set")
+    packet = data[start:end]
+    if ffmpeg_stripped:
+        # FFmpeg's KLV data muxer exposes packets beginning at the last six
+        # bytes of the MISB 0601 universal key. Reattach the stable prefix so
+        # downstream parsing uses the same full-packet path as raw KLV input.
+        packet = _MISB_0601_KEY[:10] + packet
+    return packet, end
+
+
+def iter_misb0601_packets(data: bytes) -> list[bytes]:
+    """Return every complete MISB 0601 packet found in ``data``.
+
+    Accept both raw MISB 0601 packets and FFmpeg-extracted KLV data packets.
+    FFmpeg strips the first ten bytes of the universal key when copying a
+    ``codec_type=data`` KLV stream to ``-f data``.
+    """
+    packets: list[bytes] = []
+    start, ffmpeg_stripped = _find_next_packet_start(data, 0)
     while start != -1:
         try:
-            for tag, value in _iter_local_set_items(data[start:]):
+            packet, end = _read_misb0601_packet(
+                data,
+                start,
+                ffmpeg_stripped=ffmpeg_stripped,
+            )
+            packets.append(packet)
+            start, ffmpeg_stripped = _find_next_packet_start(data, end)
+        except KlvParseError:
+            start, ffmpeg_stripped = _find_next_packet_start(data, start + 1)
+    return packets
+
+
+def extract_all_tag120_json(data: bytes) -> list[dict[str, Any]]:
+    """Return all decoded tag 120 JSON payloads found in ``data``."""
+    payloads: list[dict[str, Any]] = []
+    for packet in iter_misb0601_packets(data):
+        for tag, value in iter_local_set_items(packet):
+            if tag == MISB0601Encoder.TAG_AION_TELEMETRY_JSON:
+                decoded = json.loads(value.decode("utf-8"))
+                if not isinstance(decoded, dict):
+                    raise KlvParseError("tag 120 JSON payload is not an object")
+                payloads.append(decoded)
+    return payloads
+
+
+def extract_tag120_json(data: bytes) -> dict[str, Any] | None:
+    """Return the first decoded tag 120 JSON payload found in ``data``."""
+    start, ffmpeg_stripped = _find_next_packet_start(data, 0)
+    last_error: KlvParseError | None = None
+    while start != -1:
+        try:
+            packet, end = _read_misb0601_packet(
+                data,
+                start,
+                ffmpeg_stripped=ffmpeg_stripped,
+            )
+            for tag, value in iter_local_set_items(packet):
                 if tag == MISB0601Encoder.TAG_AION_TELEMETRY_JSON:
                     decoded = json.loads(value.decode("utf-8"))
                     if not isinstance(decoded, dict):
                         raise KlvParseError("tag 120 JSON payload is not an object")
                     return decoded
-        except KlvParseError:
-            next_start = data.find(key, start + 1)
-            if next_start == -1:
-                raise
-            start = next_start
+        except KlvParseError as exc:
+            last_error = exc
+            start, ffmpeg_stripped = _find_next_packet_start(data, start + 1)
             continue
-        start = data.find(key, start + 1)
+        start, ffmpeg_stripped = _find_next_packet_start(data, end)
+    if last_error is not None:
+        raise last_error
     return None
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="klv-tag120",
+        description="Read KLV bytes from stdin and print AION tag 120 JSON.",
+    )
+    parser.add_argument("--all", action="store_true", help="Print every tag 120 payload as a JSON list.")
+    parser.add_argument("--limit", type=int, default=None, help="Maximum payloads to print with --all.")
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point: read KLV bytes from stdin and print tag 120 JSON."""
-    _ = argv
+    args = _parse_args(argv)
     data = sys.stdin.buffer.read()
     if not data:
         print("no input bytes on stdin", file=sys.stderr)
         return 1
     try:
+        if args.all:
+            payloads = extract_all_tag120_json(data)
+            if args.limit is not None:
+                payloads = payloads[: max(0, args.limit)]
+            if not payloads:
+                print("no MISB 0601 tag 120 JSON payload found", file=sys.stderr)
+                return 1
+            print(json.dumps(payloads, indent=2, sort_keys=True))
+            return 0
         payload = extract_tag120_json(data)
     except (KlvParseError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(f"could not decode KLV tag 120: {exc}", file=sys.stderr)

@@ -11,6 +11,36 @@ import struct
 from typing import Dict, Any, Optional
 
 AION_TELEMETRY_CONTRACT_VERSION = "aion.parrot.telemetry.v1"
+UNKNOWN_SOURCE_ID = "parrot_anafi_unknown"
+
+
+def _valid_lat_lon(latitude: object, longitude: object) -> bool:
+    if isinstance(latitude, bool) or isinstance(longitude, bool):
+        return False
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return False
+    lat = float(latitude)
+    lon = float(longitude)
+    if not math.isfinite(lat) or not math.isfinite(lon):
+        return False
+    if lat == 500.0 or lon == 500.0:
+        return False
+    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
+
+
+def _safe_source_id(name: object) -> str:
+    if not isinstance(name, str) or not name.strip():
+        return UNKNOWN_SOURCE_ID
+    chars: list[str] = []
+    for ch in name.strip().lower():
+        if ch.isalnum():
+            chars.append(ch)
+        elif ch in "-_ .":
+            chars.append("_")
+    source_id = "".join(chars).strip("_")
+    while "__" in source_id:
+        source_id = source_id.replace("__", "_")
+    return source_id or UNKNOWN_SOURCE_ID
 
 
 class MISB0601Encoder:
@@ -350,9 +380,13 @@ class MISB0601Encoder:
 
 
 def _build_aion_telemetry_payload(telemetry: Dict[str, Any]) -> dict[str, Any]:
+    source_name = telemetry.get("source_name") or telemetry.get("product_name") or UNKNOWN_SOURCE_ID
+    source_id = telemetry.get("source_id") or _safe_source_id(source_name)
     return {
         "contract_version": AION_TELEMETRY_CONTRACT_VERSION,
         "source": "parrot_forwarder",
+        "source_id": source_id,
+        "source_name": source_name,
         "timestamp": telemetry.get("timestamp"),
         "timestamp_us": telemetry.get("timestamp_us"),
         "sequence": telemetry.get("sequence"),
@@ -377,27 +411,24 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
         if 'timestamp_us' in telemetry and telemetry['timestamp_us'] is not None:
             encoder.add_timestamp(telemetry['timestamp_us'])
         
-        # --- ALWAYS ADD GPS DATA (using defaults if not available) ---
-        # Add latitude (always present, uses default if GPS not fixed)
-        if 'latitude' in telemetry and telemetry['latitude'] is not None:
+        position_valid = telemetry.get("position_valid")
+        encode_position = position_valid is not False and _valid_lat_lon(
+            telemetry.get("latitude"),
+            telemetry.get("longitude"),
+        )
+
+        if encode_position and 'latitude' in telemetry and telemetry['latitude'] is not None:
             lat = float(telemetry['latitude'])
-            if -90.0 <= lat <= 90.0:
-                encoder.add_latitude(lat)
+            encoder.add_latitude(lat)
         
-        # Add longitude (always present, uses default if GPS not fixed)
-        if 'longitude' in telemetry and telemetry['longitude'] is not None:
+        if encode_position and 'longitude' in telemetry and telemetry['longitude'] is not None:
             lon = float(telemetry['longitude'])
-            if -180.0 <= lon <= 180.0:
-                encoder.add_longitude(lon)
+            encoder.add_longitude(lon)
         
-        # Add altitude (use 10m default if not available)
-        if 'altitude' in telemetry and telemetry['altitude'] is not None:
+        if encode_position and 'altitude' in telemetry and telemetry['altitude'] is not None:
             alt = float(telemetry['altitude'])
             if 0 <= alt < 6553.5:  # Max value for 2-byte scaled by 10
                 encoder.add_altitude(alt)
-        else:
-            # Default altitude: 10 meters
-            encoder.add_altitude(10.0)
         
         # Add orientation data (platform attitude from AttitudeChanged is in RADIANS)
         # Convert to degrees for KLV encoding (MISB 0601 expects degrees)

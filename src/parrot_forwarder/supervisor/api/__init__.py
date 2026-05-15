@@ -53,6 +53,7 @@ class StatusResponse(BaseModel):
     state: str
     restarts_total: int = 0
     consecutive_failures: int = 0
+    runtime: dict[str, object] = Field(default_factory=dict)
 
 
 class ResetRequest(BaseModel):
@@ -125,6 +126,7 @@ def create_app(
     app.middleware("http")(_request_id_middleware)
     app.state.config = config
     app.state.set_telemetry_fps = set_telemetry_fps
+    app.state.recorder = recorder
 
     app.add_exception_handler(HTTPException, _http_exception_to_problem)
     app.add_exception_handler(StarletteHTTPException, _http_exception_to_problem)
@@ -202,10 +204,33 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
     @app.get("/status", response_model=StatusResponse, summary="Current state snapshot")
     async def _status() -> StatusResponse:
         sm = supervisor.state_machine
+        cfg = cast("Config | None", getattr(app.state, "config", None))
+        recorder = getattr(app.state, "recorder", None)
+        runtime: dict[str, object] = {}
+        if cfg is not None:
+            runtime["forwarder"] = {
+                "telemetry_fps": cfg.forwarder.telemetry_fps,
+                "video_fps": cfg.forwarder.video_fps,
+                "srt_port": cfg.forwarder.srt_port,
+                "klv_port": cfg.forwarder.klv_port,
+            }
+            runtime["field"] = {
+                "advertised_srt_host": cfg.field.advertised_srt_host,
+                "advertised_srt_port": cfg.field.advertised_srt_port,
+                "advertised_dashboard_host": cfg.field.advertised_dashboard_host,
+                "advertised_dashboard_port": cfg.field.advertised_dashboard_port,
+                "tailscale_host": cfg.field.tailscale_host,
+            }
+        latest_metrics = getattr(app.state, "latest_heartbeat_metrics", None)
+        if isinstance(latest_metrics, dict):
+            runtime["latest_heartbeat_metrics"] = latest_metrics
+        if recorder is not None and hasattr(recorder, "status"):
+            runtime["recording"] = recorder.status()
         return StatusResponse(
             state=sm.state.value,
             restarts_total=supervisor.restart_count,
             consecutive_failures=sm.backoff.consecutive_failures,
+            runtime=runtime,
         )
 
     @app.get("/config", summary="Effective configuration")

@@ -55,6 +55,8 @@ Tag `120` contains this JSON envelope:
 {
   "contract_version": "aion.parrot.telemetry.v1",
   "source": "parrot_forwarder",
+  "source_id": "anafi",
+  "source_name": "Anafi",
   "timestamp": "2026-05-12T12:00:00.000Z",
   "timestamp_us": 1778587200000000,
   "sequence": 1234,
@@ -65,6 +67,11 @@ Tag `120` contains this JSON envelope:
 `telemetry` is the complete ParrotForwarder sample: stable flat fields plus raw
 SDK state evidence. Consumers must ignore unknown fields and preserve the
 envelope for evidence/debug dumps.
+
+`source` is the producer component identity and remains `parrot_forwarder`.
+Downstream systems that need the real aircraft label must use `source_id` and
+`source_name`, which are resolved from the drone product/name telemetry when
+available and fall back to `parrot_anafi_unknown`.
 
 The stable flat fields below are the detector contract. In addition, each
 sample may contain:
@@ -81,9 +88,9 @@ sample may contain:
 - Use `position_valid=true` before trusting `position_latitude` and
   `position_longitude`.
 - `latitude`, `longitude`, and `altitude` are the KLV compatibility values.
-  When GPS is unavailable they intentionally carry fallback coordinates for
-  legacy downstream compatibility; this is flagged by `position_is_default=true`
-  and `position_source="default"`.
+  When GPS is unavailable they are `null` in tag `120` telemetry and the
+  compatibility KLV geolocation tags `13`, `14`, and `15` are omitted. No
+  downstream consumer may substitute hardcoded coordinates.
 - Prefer `position_altitude_msl` for aircraft MSL altitude when
   `position_valid=true`; use `altitude_agl` only as above-ground height.
 - `roll`, `pitch`, and `yaw` in the JSON are radians from Olympe. `roll_deg`,
@@ -105,7 +112,7 @@ runtime:
 
 | Group | Fields |
 |---|---|
-| Sample | `timestamp`, `timestamp_us`, `sequence`, `telemetry_hz`, `telemetry_target_hz` |
+| Sample | `timestamp`, `timestamp_us`, `sequence`, `source_id`, `source_name`, `telemetry_hz`, `telemetry_target_hz` |
 | Battery / signal | `battery_percent`, `rssi_dbm`, `rssi_updated_at`, `link_quality_bits`, `link_quality_level`, `link_quality_4g_interference`, `link_quality_external_perturbation` |
 | GPS validity | `gps_fixed`, `gps_fix`, `position_valid`, `position_is_default`, `position_source`, `position_message`, `position_satellites` |
 | GPS raw | `gps_location_latitude_raw`, `gps_location_longitude_raw`, `gps_location_altitude_msl_raw`, `position_changed_latitude_raw`, `position_changed_longitude_raw`, `position_changed_altitude_msl_raw` |

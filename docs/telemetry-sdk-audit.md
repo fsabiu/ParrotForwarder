@@ -77,7 +77,8 @@ produce a passive state/event already listed below.
 - Decode tag `120` from the SRT stream and confirm `contract_version`.
 - Confirm `olympe_state_count > 0`, `olympe_state` contains SDK message-name
   keys, and `olympe_event_state` updates after gimbal/camera/RSSI events.
-- Confirm `position_valid` and raw GPS defaults while GPS is unavailable.
+- Confirm `position_valid=false` and null published coordinates while GPS is
+  unavailable; hardcoded fallback coordinates are not accepted.
 - Confirm valid GPS, altitude, attitude, speed, gimbal, camera, signal, storage,
   and product fields with the drone/controller powered and connected.
 - Compare dashboard JSON, KLV tag `120`, and detector-decoded telemetry for the

@@ -24,6 +24,9 @@ def test_default_metric_names_are_prefixed_and_have_help() -> None:
         "parrot_forwarder_restarts_total",
         "parrot_forwarder_heartbeat_lag_seconds",
         "parrot_forwarder_pipeline_fps",
+        "parrot_forwarder_telemetry_actual_hz",
+        "parrot_forwarder_klv_packets_sent",
+        "parrot_forwarder_srt_streaming",
     ):
         assert expected in body, f"{expected} not exposed"
         assert f"# HELP {expected}" in body, f"no HELP for {expected}"
@@ -56,7 +59,16 @@ def test_record_heartbeat_sets_pipeline_metrics() -> None:
     metrics = Metrics()
     metrics.record_heartbeat(
         lag_seconds=0.5,
-        pipeline_metrics={"fps": 29.97, "bitrate_kbps": 3200, "battery_percent": 82, "rssi_dbm": -60},
+        pipeline_metrics={
+            "fps": 29.97,
+            "bitrate_kbps": 3200,
+            "battery_percent": 82,
+            "rssi_dbm": -60,
+            "telemetry_actual_hz": 29.5,
+            "telemetry_target_hz": 30,
+            "klv_packets_sent": 100,
+            "srt_streaming": 1,
+        },
     )
     body = generate_latest(metrics.registry).decode("utf-8")
     assert "parrot_forwarder_heartbeat_lag_seconds 0.5" in body
@@ -64,6 +76,10 @@ def test_record_heartbeat_sets_pipeline_metrics() -> None:
     assert "parrot_forwarder_pipeline_bitrate_kbps 3200.0" in body
     assert "parrot_forwarder_battery_percent 82.0" in body
     assert "parrot_forwarder_rssi_dbm -60.0" in body
+    assert "parrot_forwarder_telemetry_actual_hz 29.5" in body
+    assert "parrot_forwarder_telemetry_target_hz 30.0" in body
+    assert "parrot_forwarder_klv_packets_sent 100.0" in body
+    assert "parrot_forwarder_srt_streaming 1.0" in body
 
 
 def test_heartbeat_ignores_missing_keys() -> None:

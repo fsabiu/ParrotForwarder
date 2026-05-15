@@ -81,6 +81,10 @@ Recording files:
 - Inside the container, the same directory is `/recordings`.
 - Active and finalized recordings are organized by date, typically `recordings/YYYY-MM-DD/default/<file>.ts`.
 - Deleted recordings are moved under `recordings/.trash/<recording-id>/`.
+- Audit a finalized file with
+  `scripts/field_check.sh audit-file recordings/<date>/<mission>/<file>.ts`.
+  The report proves video continuity, KLV cadence, tag `120` presence,
+  source identity, GPS validity, and altitude field availability.
 - If Docker is running inside a VM, this path is inside the guest by default. It does not appear automatically on the macOS host unless you also configure a VM shared folder or another host/guest file-sharing mechanism.
 
 Startup behavior:
@@ -186,6 +190,9 @@ docker compose ps
 # 2. What does it think it is doing?
 curl -sf http://localhost:8080/status | jq
 
+# 2b. Are source-side metrics being published?
+curl -sf http://localhost:8080/metrics | grep -E 'telemetry_actual_hz|klv_packets_sent|srt_streaming'
+
 # 3. What has happened recently?
 sudo journalctl -u parrot_forwarder -n 200 --no-pager
 # or, if containerized:
@@ -204,6 +211,9 @@ sudo ss -lpn | grep 8890
 
 # 7. Can another host read it?
 ffplay -fflags nobuffer -flags low_delay 'srt://<machine-ip>:8890'
+
+# 8. Can the stream produce tag 120 telemetry?
+scripts/field_check.sh sample-n
 ```
 
 ## Common faults
@@ -215,6 +225,7 @@ ffplay -fflags nobuffer -flags low_delay 'srt://<machine-ip>:8890'
 | `POST /control/start` returns 409 | worker backend disabled on this host | use Linux + Olympe + GStreamer, or run the Docker compose deployment on the target machine |
 | `state: DEGRADED`, signal=fps | video pipeline stalled | restart via `POST /control/reset`; if persists, `sudo journalctl -u parrot_forwarder \| grep pipeline.error` |
 | `state: STREAMING` but no video at client | network / firewall | `ufw allow 8890`; verify SRT locally: `ffplay -fflags nobuffer -flags low_delay 'srt://localhost:8890'` |
+| Indoor GPS shows coordinates | stale image or downstream fallback | rebuild/restart the container and verify tag `120` has `position_valid=false` with null coordinates |
 | controller LAN IP pings but ports `180/554/44444-44447` are refused | incompatible USB-Ethernet adapter / dock path | replace the adapter chain; keep the Mac out of the USB path and use a known-good controller Ethernet path |
 | Dashboard blank / 404 | wrong port | confirm `supervisor.http.port` in `config.yaml` and `ss -lpn \| grep 8080` |
 | `protobuf 4.x` error | env corruption | re-run `./scripts/install.sh` - it force-reinstalls `protobuf==3.20.3` |
@@ -222,8 +233,9 @@ ffplay -fflags nobuffer -flags low_delay 'srt://<machine-ip>:8890'
 ## Metrics
 
 Prometheus scrape target: `http://localhost:8080/metrics`.
-Grafana dashboard JSON shipping in a follow-up; the metric set is documented
-in [v2/architecture/state-machine.md#metrics-exported](../v2/architecture/state-machine.md#metrics-exported).
+Source-side field diagnostics include telemetry target/actual Hz, KLV packets
+sent/errors, GStreamer warnings/errors, and whether the SRT pipeline reports
+streaming.
 
 ## REST / WS contract
 

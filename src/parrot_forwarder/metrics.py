@@ -97,6 +97,46 @@ class Metrics:
             "Drone RF signal strength.",
             registry=self.registry,
         )
+        self.telemetry_target_hz = Gauge(
+            f"{PREFIX}telemetry_target_hz",
+            "Configured telemetry/KLV target cadence in Hz.",
+            registry=self.registry,
+        )
+        self.telemetry_actual_hz = Gauge(
+            f"{PREFIX}telemetry_actual_hz",
+            "Observed source-side telemetry/KLV cadence in Hz.",
+            registry=self.registry,
+        )
+        self.klv_packets_sent = Gauge(
+            f"{PREFIX}klv_packets_sent",
+            "Number of KLV packets sent by the telemetry source.",
+            registry=self.registry,
+        )
+        self.klv_send_errors = Gauge(
+            f"{PREFIX}klv_send_errors",
+            "Number of telemetry-to-KLV send errors observed by the source.",
+            registry=self.registry,
+        )
+        self.telemetry_loop_max_ms = Gauge(
+            f"{PREFIX}telemetry_loop_max_ms",
+            "Maximum telemetry loop time in the recent source-side window.",
+            registry=self.registry,
+        )
+        self.gstreamer_errors = Gauge(
+            f"{PREFIX}gstreamer_errors",
+            "Number of GStreamer errors observed by the source pipeline.",
+            registry=self.registry,
+        )
+        self.gstreamer_warnings = Gauge(
+            f"{PREFIX}gstreamer_warnings",
+            "Number of GStreamer warnings observed by the source pipeline.",
+            registry=self.registry,
+        )
+        self.srt_streaming = Gauge(
+            f"{PREFIX}srt_streaming",
+            "Whether the source SRT pipeline reports streaming: 1 yes, 0 no.",
+            registry=self.registry,
+        )
 
     # ------------------------------------------------------------------
     # Recorders
@@ -122,6 +162,14 @@ class Metrics:
             ("bitrate_kbps", self.pipeline_bitrate_kbps),
             ("battery_percent", self.battery_percent),
             ("rssi_dbm", self.rssi_dbm),
+            ("telemetry_target_hz", self.telemetry_target_hz),
+            ("telemetry_actual_hz", self.telemetry_actual_hz),
+            ("klv_packets_sent", self.klv_packets_sent),
+            ("klv_send_errors", self.klv_send_errors),
+            ("telemetry_loop_max_ms", self.telemetry_loop_max_ms),
+            ("gstreamer_errors", self.gstreamer_errors),
+            ("gstreamer_warnings", self.gstreamer_warnings),
+            ("srt_streaming", self.srt_streaming),
         ):
             value = pipeline_metrics.get(source_key)
             if value is not None:

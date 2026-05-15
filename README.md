@@ -88,13 +88,13 @@ Common LAN examples:
 - **30 Hz update rate** for telemetry by default
 - **Comprehensive data:**
   - Unix timestamp (microseconds)
-  - GPS position (latitude, longitude, altitude MSL) with fallback defaults
+  - GPS position (latitude, longitude, altitude MSL) only when valid
   - Platform attitude (roll, pitch, yaw in degrees)
   - Gimbal state (absolute and relative yaw/pitch/roll angles)
   - Camera sensor parameters (width, height, focal length)
   - Battery level and GPS fix status
   - Full sanitized Olympe SDK state cache in KLV tag 120 for detector evidence
-- **GPS fallback system** - uses default coordinates when GPS unavailable
+- **Invalid-GPS safety** - no hardcoded coordinates are emitted when GPS is unavailable
 - **Enhanced sensor tracking** - includes gimbal offsets and camera alignment
 - **Validation and scaling** per MISB 0601 specification
 - **UDP transport** for local KLV→GStreamer communication
@@ -181,7 +181,7 @@ ParrotForwarder uses a **unified streaming architecture** that synchronizes vide
 │  │ • Precise 30 Hz timing   │   │ • SRT output         │  │
 │  │ • Performance stats      │   │ • Status monitoring  │  │
 │  │ • Sends to localhost UDP │   │ • Error tracking     │  │
-│  │ • GPS fallback system    │   │ • Latency modes      │  │
+│  │ • Invalid-GPS safety     │   │ • Latency modes      │  │
 │  │ • Gimbal & camera data   │   │ • Auto-recovery      │  │
 │  └────┬─────────────────────┘   └───────────┬──────────┘  │
 │       │ KLV over UDP (localhost:12345)      │              │
@@ -1020,18 +1020,17 @@ The service now automatically handles drone disconnections:
 **Solutions**:
 1. Check TelemetryForwarder is running and sending packets
 2. Verify KLV port: `python tests/test_klv_receiver.py --port 12345`
-3. Check for GPS fix - drone may be sending placeholder coordinates indoors
+3. Check GPS validity in tag 120 - indoors this should be `position_valid=false`
 4. Review logs for KLV encoding errors: `sudo journalctl -u parrot_forwarder | grep KLV`
-5. GPS fallback system provides default coordinates when GPS unavailable
+5. No hardcoded coordinates are emitted when GPS is unavailable
 6. Enhanced telemetry includes gimbal and camera sensor data
 
 **Problem**: `struct.error: 'i' format requires ...` in KLV encoder
 
 **Solutions**:
 1. This occurs when GPS is not fixed (invalid coordinates)
-2. The encoder automatically validates coordinates and uses fallback defaults
-3. **NEW**: Default coordinates (36.715°N, -4.288°W, 10m altitude) are used when GPS unavailable
-4. Check logs for "GPS not fixed" messages - this is now handled gracefully
+2. The encoder validates coordinates and omits geolocation tags when GPS is invalid
+3. Check logs for "NO VALID GPS" messages - this is handled without hardcoded coordinates
 
 **Problem**: Missing gimbal or camera telemetry data
 
@@ -1122,7 +1121,7 @@ For questions, issues, or contributions, please open an issue on GitHub.
 
 ### v1.1.0 - Enhanced Telemetry & Auto-Reconnect
 - **Enhanced KLV Telemetry**: Added comprehensive gimbal and camera sensor data
-- **GPS Fallback System**: Automatic default coordinates when GPS unavailable  
+- **Invalid-GPS Safety**: No hardcoded coordinates when GPS is unavailable
 - **Auto-Reconnect**: Continuous operation through drone disconnections
 - **Dual Latency Modes**: High-latency (stable) and low-latency (fast) pipelines
 - **Enhanced Monitoring**: Real-time performance tracking and error reporting
@@ -1131,6 +1130,6 @@ For questions, issues, or contributions, please open an issue on GitHub.
 ### Key New Features
 - Gimbal orientation tracking (absolute and relative angles)
 - Camera sensor parameters (dimensions, focal length)
-- GPS fallback with default coordinates (36.715°N, -4.288°W)
+- GPS validity flags with null coordinates when GPS is unavailable
 - Configurable health monitoring and reconnection behavior
 - Enhanced MISB 0601 KLV encoding with additional tags

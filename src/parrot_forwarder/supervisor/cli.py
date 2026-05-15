@@ -27,6 +27,7 @@ from .. import ipc as ipc_module
 from ..backoff import BackoffPolicy
 from ..config import Config, ConfigError, LoggingConfig, load_config
 from ..logging_setup import configure_logging
+from ..metrics import Metrics, register_metrics_route
 from ..state_machine import Heartbeat
 from . import Supervisor, WorkerHandle, ipc_to_event
 from .api import create_app
@@ -64,6 +65,7 @@ def _resolve_backend(requested: str) -> str:
 def _install_event_bridge(
     supervisor: Supervisor,
     events: Broadcaster,
+    metrics: Metrics | None = None,
 ) -> None:
     original_dispatch = supervisor._dispatch
 
@@ -72,6 +74,12 @@ def _install_event_bridge(
         await original_dispatch(event)
         after = supervisor.state_machine.state.value
         if after != before:
+            if metrics is not None:
+                metrics.record_state_transition(
+                    from_state=before,
+                    to_state=after,
+                    reason=type(event).__name__,
+                )
             await publish_state_transition(
                 events,
                 from_state=before,
@@ -177,6 +185,8 @@ def _build_message_handler(
     *,
     telemetry: Broadcaster,
     health: HealthMonitor,
+    metrics: Metrics | None = None,
+    latest_metrics: dict[str, float] | None = None,
 ) -> Callable[[ipc_module._IpcBase], Awaitable[None]]:
     async def _handle(message: ipc_module._IpcBase) -> None:
         if isinstance(message, ipc_module.TelemetryMsg):
@@ -189,6 +199,11 @@ def _build_message_handler(
 
         if isinstance(message, ipc_module.HeartbeatMsg):
             assert isinstance(event, Heartbeat)
+            if latest_metrics is not None:
+                latest_metrics.clear()
+                latest_metrics.update(message.metrics)
+            if metrics is not None:
+                metrics.record_heartbeat(lag_seconds=0.0, pipeline_metrics=message.metrics)
             for health_event in health.record_heartbeat(event, metrics=message.metrics):
                 await supervisor.post_event(health_event)
 
@@ -231,6 +246,8 @@ async def _amain(args: argparse.Namespace) -> int:
 
     events = Broadcaster()
     telemetry = Broadcaster()
+    metrics = Metrics() if cfg.metrics.enabled else None
+    latest_heartbeat_metrics: dict[str, float] = {}
     health = HealthMonitor(
         thresholds=HealthThresholds(
             heartbeat_timeout_seconds=cfg.supervisor.heartbeat.timeout_seconds,
@@ -252,6 +269,8 @@ async def _amain(args: argparse.Namespace) -> int:
             supervisor,
             telemetry=telemetry,
             health=health,
+            metrics=metrics,
+            latest_metrics=latest_heartbeat_metrics,
         )
 
         async def _worker_factory(sup: Supervisor) -> WorkerHandle:
@@ -275,7 +294,7 @@ async def _amain(args: argparse.Namespace) -> int:
             start_enabled=False,
         )
 
-    _install_event_bridge(supervisor, events)
+    _install_event_bridge(supervisor, events, metrics=metrics)
 
     recorder: Recorder | None = None
     recording_index: RecordingIndex | None = None
@@ -321,6 +340,9 @@ async def _amain(args: argparse.Namespace) -> int:
         recording_index=recording_index,
         recordings_root=recordings_root,
     )
+    app.state.latest_heartbeat_metrics = latest_heartbeat_metrics
+    if metrics is not None:
+        register_metrics_route(app, metrics, path=current_config.metrics.path)
     register_stream_routes(
         app,
         events=events,
