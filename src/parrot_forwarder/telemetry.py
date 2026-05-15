@@ -64,6 +64,7 @@ from olympe.messages.wifi import rssi_changed as WifiRssiChanged
 
 from .klv_encoder import encode_telemetry_to_klv
 from .sanitize import jsonable as _jsonable
+from .telemetry_extractors import sdk_wifi_rssi_dbm
 
 
 UNKNOWN_SOURCE_ID = "parrot_anafi_unknown"
@@ -538,6 +539,8 @@ class TelemetryForwarder(threading.Thread):
             wifi = self._safe_get_state(WifiSignalChanged)
             if wifi:
                 telemetry["rssi_dbm"] = _number(wifi.get("rssi"))
+            if telemetry.get("rssi_dbm") is None:
+                telemetry["rssi_dbm"] = sdk_wifi_rssi_dbm(sdk_state)
 
         link_quality = self._safe_get_state(LinkSignalQuality)
         if link_quality:
