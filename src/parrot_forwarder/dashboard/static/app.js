@@ -629,7 +629,8 @@ function renderTelemetry(payload, sampleTime) {
   setField("position-valid", fmtBool(payload.position_valid));
   setField("satellites", fmtInteger(position.satellites));
   setField("rssi", isNumber(payload.rssi_dbm) ? `${payload.rssi_dbm} dBm` : "-");
-  setField("fps", isNumber(payload.fps) ? payload.fps.toFixed(1) : "-");
+  const videoTargetFps = isNumber(payload.video_target_fps) ? payload.video_target_fps : payload.fps;
+  setField("fps", isNumber(videoTargetFps) ? `${videoTargetFps.toFixed(1)} fps` : "-");
   // "last-telemetry" is driven by tickTimers() as a relative "Ns ago" value;
   // don't overwrite with the raw ISO timestamp here (caused a 1 Hz flicker
   // between the timestamp and "0s ago").

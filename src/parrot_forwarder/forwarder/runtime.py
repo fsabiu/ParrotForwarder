@@ -99,7 +99,14 @@ def _normalize_telemetry(snapshot: dict[str, object]) -> dict[str, object]:
         "position_valid": raw.get("position_valid"),
         "rssi_dbm": raw.get("rssi_dbm"),
         "telemetry_hz": raw.get("telemetry_hz", raw.get("telemetry_target_hz")),
-        "fps": raw.get("fps", raw.get("telemetry_hz", raw.get("telemetry_target_hz"))),
+        "telemetry_target_hz": raw.get("telemetry_target_hz", raw.get("telemetry_hz")),
+        "telemetry_actual_hz": raw.get("telemetry_actual_hz"),
+        "video_target_fps": raw.get("video_target_fps", raw.get("video_fps", raw.get("fps"))),
+        "video_measured_fps": raw.get("video_measured_fps"),
+        # Legacy key retained only when the source explicitly provides video FPS.
+        # Do not fall back to telemetry_hz: that made telemetry cadence look like
+        # measured video cadence in downstream dashboards.
+        "fps": raw.get("fps"),
     }
 
     position = _compact(
@@ -420,11 +427,14 @@ class V1ForwarderRuntime:
         telemetry = self._forwarder.telemetry_forwarder
         if telemetry is None:
             return {}
-        return _normalize_telemetry(telemetry.get_telemetry_data())
+        normalized = _normalize_telemetry(telemetry.get_telemetry_data())
+        normalized["telemetry_target_hz"] = float(self.config.telemetry_fps)
+        normalized["video_target_fps"] = float(self.config.video_fps)
+        return normalized
 
     def heartbeat_metrics(self, snapshot: dict[str, object]) -> dict[str, float]:
         metrics: dict[str, float] = {}
-        for key in ("battery_percent", "rssi_dbm", "fps"):
+        for key in ("battery_percent", "rssi_dbm", "video_target_fps", "video_measured_fps"):
             value = snapshot.get(key)
             if isinstance(value, bool):
                 metrics[key] = float(value)

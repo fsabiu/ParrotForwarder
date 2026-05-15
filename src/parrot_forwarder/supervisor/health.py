@@ -118,7 +118,7 @@ class HealthMonitor:
     # ------------------------------------------------------------------
 
     def _check_fps(self, metrics: dict[str, float]) -> list[Event]:
-        fps = metrics.get("fps")
+        fps = metrics.get("video_measured_fps", metrics.get("fps"))
         if fps is None:
             return []
         now = self.now_fn()
