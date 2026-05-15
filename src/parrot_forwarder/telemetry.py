@@ -65,9 +65,7 @@ from olympe.messages.wifi import rssi_changed as WifiRssiChanged
 from .klv_encoder import encode_telemetry_to_klv
 
 
-DEFAULT_LATITUDE = 36.71549027372183
-DEFAULT_LONGITUDE = -4.287949979844388
-DEFAULT_ALTITUDE_MSL_M = 10.0
+UNKNOWN_SOURCE_ID = "parrot_anafi_unknown"
 _MISSING = object()
 
 
@@ -112,6 +110,21 @@ def _klv_safe_altitude_msl(altitude_msl: float | None) -> float | None:
     if altitude_msl is None:
         return None
     return altitude_msl if 0.0 <= altitude_msl < 6553.5 else None
+
+
+def _safe_source_id(name: object) -> str:
+    if not isinstance(name, str) or not name.strip():
+        return UNKNOWN_SOURCE_ID
+    chars: list[str] = []
+    for ch in name.strip().lower():
+        if ch.isalnum():
+            chars.append(ch)
+        elif ch in "-_ .":
+            chars.append("_")
+    source_id = "".join(chars).strip("_")
+    while "__" in source_id:
+        source_id = source_id.replace("__", "_")
+    return source_id or UNKNOWN_SOURCE_ID
 
 
 def _camera_fov_degrees(
@@ -456,20 +469,20 @@ class TelemetryForwarder(threading.Thread):
         telemetry["gps_fix"] = gps_fixed
 
         telemetry["position_valid"] = position_valid
-        telemetry["position_is_default"] = not position_valid
-        telemetry["position_source"] = "gps" if position_valid else "default"
+        telemetry["position_is_default"] = False
+        telemetry["position_source"] = "gps" if position_valid else "invalid"
         if not gps_fixed and not position_valid:
             position_message = "gps_fix_unavailable"
         telemetry["position_message"] = position_message
         telemetry["position_latitude"] = chosen_lat if position_valid else None
         telemetry["position_longitude"] = chosen_lon if position_valid else None
-        telemetry["position_altitude_msl"] = chosen_alt_msl
-        telemetry["platform_altitude_msl"] = chosen_alt_msl
+        telemetry["position_altitude_msl"] = chosen_alt_msl if position_valid else None
+        telemetry["platform_altitude_msl"] = chosen_alt_msl if position_valid else None
 
-        telemetry["latitude"] = chosen_lat if position_valid else DEFAULT_LATITUDE
-        telemetry["longitude"] = chosen_lon if position_valid else DEFAULT_LONGITUDE
+        telemetry["latitude"] = chosen_lat if position_valid else None
+        telemetry["longitude"] = chosen_lon if position_valid else None
         telemetry["altitude"] = (
-            _klv_safe_altitude_msl(chosen_alt_msl) or DEFAULT_ALTITUDE_MSL_M
+            _klv_safe_altitude_msl(chosen_alt_msl) if position_valid else None
         )
 
         if home:
@@ -503,7 +516,7 @@ class TelemetryForwarder(threading.Thread):
         telemetry["altitude_relative_takeoff_m"] = altitude_takeoff_m
         telemetry["altitude_takeoff_m"] = altitude_takeoff_m
         telemetry["altitude_agl"] = altitude_agl_m
-        if altitude_agl_m is not None and chosen_alt_msl is not None:
+        if position_valid and altitude_agl_m is not None and chosen_alt_msl is not None:
             telemetry["ground_altitude_msl"] = chosen_alt_msl - altitude_agl_m
 
         attitude = self._safe_get_state(AttitudeChanged)
@@ -683,6 +696,12 @@ class TelemetryForwarder(threading.Thread):
                 "totalFlightDuration"
             )
 
+        source_name = telemetry.get("product_name")
+        if not isinstance(source_name, str) or not source_name.strip():
+            source_name = UNKNOWN_SOURCE_ID
+        telemetry["source_name"] = source_name
+        telemetry["source_id"] = _safe_source_id(source_name)
+
         return telemetry
     
     def forward_telemetry(self, telemetry):
@@ -720,7 +739,7 @@ class TelemetryForwarder(threading.Thread):
                 gps_status = (
                     "GPS VALID"
                     if telemetry.get("position_valid")
-                    else "NO VALID GPS (default KLV coordinates)"
+                    else "NO VALID GPS (no KLV geolocation tags)"
                 )
                 self.logger.info(
                     f"DEBUG: KLV packet #{self.packets_sent + 1} - "
@@ -798,6 +817,25 @@ class TelemetryForwarder(threading.Thread):
                     )
             
             self.last_stats_time = current_time
+
+    def metrics_snapshot(self) -> dict[str, float]:
+        """Return source-side telemetry/KLV counters for supervisor heartbeats."""
+        now = time.time()
+        elapsed = 0.0 if self.start_time is None else max(0.0, now - self.start_time)
+        actual_hz = self.telemetry_count / elapsed if elapsed > 0 else 0.0
+        metrics: dict[str, float] = {
+            "telemetry_target_hz": float(self.fps),
+            "telemetry_actual_hz": float(actual_hz),
+            "klv_packets_sent": float(self.packets_sent),
+            "klv_send_errors": float(self.send_errors),
+        }
+        if self.loop_times:
+            metrics["telemetry_loop_avg_ms"] = (
+                sum(self.loop_times) / len(self.loop_times)
+            ) * 1000.0
+            metrics["telemetry_loop_min_ms"] = min(self.loop_times) * 1000.0
+            metrics["telemetry_loop_max_ms"] = max(self.loop_times) * 1000.0
+        return metrics
     
     def run(self):
         """Main thread execution loop with precise timing."""

@@ -54,6 +54,7 @@ dev = [
 parrot-forwarder = "parrot_forwarder.cli:main"
 parrot-forwarder-worker = "parrot_forwarder.forwarder.worker:main"
 parrot-forwarder-supervisor = "parrot_forwarder.supervisor.cli:main"
+parrot-forwarder-recording-audit = "parrot_forwarder.tools.recording_audit:main"
 
 [project.urls]
 Repository = "https://github.com/fsabiu/ParrotForwarder"

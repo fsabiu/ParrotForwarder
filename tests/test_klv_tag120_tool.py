@@ -6,7 +6,11 @@ from parrot_forwarder.klv_encoder import (
     AION_TELEMETRY_CONTRACT_VERSION,
     encode_telemetry_to_klv,
 )
-from parrot_forwarder.tools.klv_tag120 import KlvParseError, extract_tag120_json
+from parrot_forwarder.tools.klv_tag120 import (
+    KlvParseError,
+    extract_all_tag120_json,
+    extract_tag120_json,
+)
 
 
 def test_extract_tag120_json_from_klv_packet() -> None:
@@ -34,6 +38,21 @@ def test_extract_tag120_json_from_klv_packet() -> None:
 
 def test_extract_tag120_json_returns_none_without_misb_key() -> None:
     assert extract_tag120_json(b"not klv") is None
+
+
+def test_extract_all_tag120_json_returns_multiple_payloads() -> None:
+    first = encode_telemetry_to_klv(
+        {"timestamp_us": 1, "sequence": 1, "position_valid": False}
+    )
+    second = encode_telemetry_to_klv(
+        {"timestamp_us": 2, "sequence": 2, "position_valid": False}
+    )
+
+    assert first is not None
+    assert second is not None
+    payloads = extract_all_tag120_json(first + b"noise" + second)
+
+    assert [payload["sequence"] for payload in payloads] == [1, 2]
 
 
 def test_extract_tag120_json_rejects_truncated_packet() -> None:

@@ -92,6 +92,8 @@ def _normalize_telemetry(snapshot: dict[str, object]) -> dict[str, object]:
     normalized: dict[str, object] = {
         "timestamp": raw.get("timestamp"),
         "sequence": raw.get("sequence"),
+        "source_id": raw.get("source_id"),
+        "source_name": raw.get("source_name"),
         "battery_percent": raw.get("battery_percent"),
         "gps_fix": gps_fix,
         "position_valid": raw.get("position_valid"),
@@ -428,6 +430,23 @@ class V1ForwarderRuntime:
                 metrics[key] = float(value)
             elif isinstance(value, (int, float)):
                 metrics[key] = float(value)
+        telemetry = self._forwarder.telemetry_forwarder
+        if telemetry is not None and hasattr(telemetry, "metrics_snapshot"):
+            telemetry_metrics = telemetry.metrics_snapshot()
+            if isinstance(telemetry_metrics, dict):
+                for key, value in telemetry_metrics.items():
+                    if isinstance(value, (int, float)):
+                        metrics[key] = float(value)
+        video = self._forwarder.video_forwarder
+        if video is not None:
+            metrics["srt_streaming"] = 1.0 if self.is_pipeline_running() else 0.0
+            for attr, key in (
+                ("gst_errors", "gstreamer_errors"),
+                ("gst_warnings", "gstreamer_warnings"),
+            ):
+                value = getattr(video, attr, None)
+                if isinstance(value, (int, float)):
+                    metrics[key] = float(value)
         return metrics
 
 
@@ -463,6 +482,8 @@ class MockForwarderRuntime:
         if not self.connected:
             return {}
         return {
+            "source_id": "mock_anafi",
+            "source_name": "Mock Anafi",
             "battery_percent": 75,
             "gps_fix": True,
             "telemetry_hz": float(self.config.telemetry_fps),
@@ -475,6 +496,9 @@ class MockForwarderRuntime:
             value = snapshot.get(key)
             if isinstance(value, (int, float)):
                 metrics[key] = float(value)
+        metrics["telemetry_target_hz"] = float(self.config.telemetry_fps)
+        metrics["telemetry_actual_hz"] = float(self.config.telemetry_fps)
+        metrics["srt_streaming"] = 1.0 if self.streaming else 0.0
         return metrics
 
 

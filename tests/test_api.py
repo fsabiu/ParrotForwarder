@@ -91,6 +91,23 @@ async def test_status_exposes_current_state(
     body = response.json()
     assert body["state"] == "DISCONNECTED"
     assert body["consecutive_failures"] == 0
+    assert body["runtime"] == {}
+
+
+async def test_status_exposes_runtime_config_and_latest_metrics(
+    supervisor: Supervisor,
+) -> None:
+    app = create_app(supervisor, Config())
+    app.state.latest_heartbeat_metrics = {"telemetry_actual_hz": 29.5, "srt_streaming": 1.0}
+    client = TestClient(app)
+
+    response = client.get("/status")
+
+    assert response.status_code == 200
+    runtime = response.json()["runtime"]
+    assert runtime["forwarder"]["telemetry_fps"] == 30
+    assert runtime["forwarder"]["srt_port"] == 8890
+    assert runtime["latest_heartbeat_metrics"]["telemetry_actual_hz"] == 29.5
 
 
 async def test_config_endpoint_returns_backoff_shape(client: TestClient) -> None:

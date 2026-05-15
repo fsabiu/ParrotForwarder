@@ -7,13 +7,15 @@ def test_normalize_telemetry_groups_rich_snapshot() -> None:
     snapshot: dict[str, object] = {
         "timestamp": "2026-04-17T16:00:00Z",
         "sequence": 12,
+        "source_id": "anafi",
+        "source_name": "Anafi",
         "battery_percent": 82,
         "telemetry_hz": 30,
         "gps_fixed": False,
         "position_valid": False,
-        "position_source": "default",
+        "position_source": "invalid",
         "position_message": "gps_fix_unavailable",
-        "position_is_default": True,
+        "position_is_default": False,
         "position_satellites": 0,
         "position_latitude_accuracy_m": 3.0,
         "position_longitude_accuracy_m": 4.0,
@@ -24,13 +26,13 @@ def test_normalize_telemetry_groups_rich_snapshot() -> None:
         "position_changed_latitude_raw": 500.0,
         "position_changed_longitude_raw": 500.0,
         "position_changed_altitude_msl_raw": 143.2,
-        "latitude": 36.71549027372183,
-        "longitude": -4.287949979844388,
-        "altitude": 10.0,
-        "position_altitude_msl": 143.2,
+        "latitude": None,
+        "longitude": None,
+        "altitude": None,
+        "position_altitude_msl": None,
         "altitude_agl": 21.7,
         "altitude_relative_takeoff_m": 24.5,
-        "ground_altitude_msl": 121.5,
+        "ground_altitude_msl": None,
         "roll": 0.10,
         "pitch": -0.20,
         "yaw": 1.20,
@@ -115,27 +117,22 @@ def test_normalize_telemetry_groups_rich_snapshot() -> None:
     normalized = _normalize_telemetry(snapshot)
 
     assert normalized["gps_fix"] is False
+    assert normalized["source_id"] == "anafi"
+    assert normalized["source_name"] == "Anafi"
     assert normalized["battery_percent"] == 82
     assert normalized["telemetry_hz"] == 30
     assert normalized["fps"] == 30
     assert normalized["position_valid"] is False
     assert normalized["position"] == {
         "valid": False,
-        "source": "default",
+        "source": "invalid",
         "message": "gps_fix_unavailable",
-        "is_default": True,
+        "is_default": False,
         "gps_fix": False,
         "satellites": 0,
-        "altitude_msl_m": 143.2,
         "altitude_agl_m": 21.7,
         "altitude_relative_takeoff_m": 24.5,
-        "ground_altitude_msl_m": 121.5,
         "accuracy_m": {"latitude": 3.0, "longitude": 4.0, "altitude": 5.0},
-        "klv": {
-            "latitude": 36.71549027372183,
-            "longitude": -4.287949979844388,
-            "altitude_msl_m": 10.0,
-        },
         "raw": {
             "gps_location": {
                 "latitude": 500.0,
