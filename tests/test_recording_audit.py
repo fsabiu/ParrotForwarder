@@ -48,6 +48,35 @@ def test_audit_klv_bytes_reports_tag120_cadence_and_fields() -> None:
     assert tag120["altitude"]["agl_m"]["mean"] == 1.5
 
 
+def test_audit_klv_bytes_accepts_ffmpeg_stripped_klv_packets() -> None:
+    packet = encode_telemetry_to_klv(
+        {
+            "timestamp": "2026-05-15T12:00:00.000Z",
+            "timestamp_us": 1_700_000_000_000_000,
+            "sequence": 1,
+            "position_valid": False,
+            "position_is_default": False,
+            "position_latitude": None,
+            "position_longitude": None,
+            "source_id": "anafi",
+            "source_name": "Anafi",
+            "battery_percent": 73,
+            "altitude_agl": 1.5,
+            "altitude_relative_takeoff_m": 1.7,
+            "product_name": "Anafi",
+            "olympe_state_count": 1,
+        }
+    )
+
+    assert packet is not None
+    report = audit_klv_bytes(packet[10:])
+
+    assert report["packets"] == 1
+    assert report["tags"]["120"] == 1
+    assert report["tag120"]["count"] == 1
+    assert report["tag120"]["source_ids"] == {"anafi": 1}
+
+
 def test_audit_klv_bytes_reports_legacy_file_without_tag120() -> None:
     encoder = MISB0601Encoder()
     encoder.add_timestamp(1_700_000_000_000_000)
