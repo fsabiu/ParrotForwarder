@@ -182,8 +182,9 @@ class RecordingConfig(BaseModel):
     Recording runs as a sibling ``ffmpeg`` process that consumes the
     forwarder's own SRT output and writes an MPEG-TS file preserving both
     the H.264 video stream and the KLV data stream. Files land under
-    ``path`` in a deterministic ``YYYY-MM-DD/<mission>/<drone>_<session>_<start>.ts``
-    layout and are indexed in ``<path>/index.db``.
+    ``path`` in a deterministic ``YYYY-MM-DD/<mission>/<name>_<start>.ts``
+    layout and are indexed in ``<path>/index.db``. When the operator provides
+    notes, the sanitized notes become the primary filename segment.
 
     None of these fields are reloadable at runtime: they affect the child
     subprocess command line and the file layout on disk.

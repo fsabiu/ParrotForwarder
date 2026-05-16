@@ -7,7 +7,7 @@ Covered behaviours:
 - Insert active -> list returns it with state='active'.
 - Finalize updates state + stopped_at + bytes + sha256 + duration.
 - Mark error updates state + error_reason.
-- Soft delete moves state to 'deleted' and updates path.
+- Delete removes rows permanently.
 - Crash-reopen: active rows are enumerable via ``iter_active`` so the
   supervisor can reconcile them on startup.
 - List filters (state, mission_id, since) + limit.
@@ -101,14 +101,11 @@ def test_mark_error_updates_reason(index: RecordingIndex) -> None:
     assert row.error_reason == "ffmpeg exited non-zero"
 
 
-def test_soft_delete_moves_path(index: RecordingIndex) -> None:
+def test_delete_removes_row(index: RecordingIndex) -> None:
     index.insert_active(recording_id="r1", path="/r/x.ts", started_at=_mkdt())
     index.finalize("r1", bytes_=1, sha256="x", stopped_at=_mkdt(1))
-    index.soft_delete("r1", "/r/.trash/r1/x.ts")
-    row = index.get("r1")
-    assert row is not None
-    assert row.state == "deleted"
-    assert row.path == "/r/.trash/r1/x.ts"
+    index.delete("r1")
+    assert index.get("r1") is None
 
 
 def test_list_filters_by_state_mission_and_since(index: RecordingIndex) -> None:

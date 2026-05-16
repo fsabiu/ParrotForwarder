@@ -16,6 +16,7 @@ const DASHBOARD_THEME_KEY = "parrotForwarder.theme";
 const DASHBOARD_THEMES = new Set(["dark", "light", "sun"]);
 const STREAM_RECONNECT_DELAY_MS = 1000;
 const STATUS_REFRESH_INTERVAL_MS = 1000;
+const RECORDING_STATUS_REFRESH_INTERVAL_MS = 1000;
 const TELEMETRY_STALE_AFTER_MS = 3000;
 const DESKTOP_LAYOUT_MEDIA_QUERY = "(min-width: 1101px)";
 
@@ -514,6 +515,7 @@ function tickTimers() {
     const seconds = Math.floor(ageMs / 1000);
     setField("last-telemetry", `${seconds}s ago`);
   }
+  updateRecElapsedFromClock();
 }
 
 function wsUrl(path) {
@@ -853,6 +855,15 @@ function setRecButtonsForState(active) {
   if (btnStop) btnStop.disabled = !active;
 }
 
+function updateRecElapsedFromClock(fallbackSeconds = null) {
+  if (!recState.active) return;
+  if (recState.startedAt && Number.isFinite(recState.startedAt)) {
+    setField("rec-elapsed", humanDuration((Date.now() - recState.startedAt) / 1000));
+  } else {
+    setField("rec-elapsed", humanDuration(fallbackSeconds));
+  }
+}
+
 async function refreshRecStatus() {
   try {
     const r = await fetch("/recording/status");
@@ -863,7 +874,7 @@ async function refreshRecStatus() {
       recState.startedAt = Date.parse(s.started_at);
       recState.bytes = s.bytes || 0;
       setField("rec-status", `recording (id ${s.recording_id?.slice(0, 8) || "?"})`);
-      setField("rec-elapsed", humanDuration(s.elapsed_s));
+      updateRecElapsedFromClock(s.elapsed_s);
       setField("rec-bytes", humanBytes(s.bytes));
       setField("rec-file", s.path || "-");
     } else {
@@ -925,7 +936,8 @@ async function refreshRecList() {
       const sizeCell = document.createElement("td");
       sizeCell.textContent = humanBytes(row.bytes);
       const missionCell = document.createElement("td");
-      missionCell.textContent = row.mission_id || "-";
+      missionCell.textContent = row.filename || row.mission_id || "-";
+      if (row.path) missionCell.title = row.path;
       const actionsCell = document.createElement("td");
       const download = document.createElement("a");
       download.textContent = "Download";
@@ -995,7 +1007,7 @@ async function handleRecStop() {
 }
 
 async function handleRecDelete(id) {
-  if (!confirm(`Delete recording ${id.slice(0, 8)}...? (soft-delete, moves to .trash/)`)) return;
+  if (!confirm(`Permanently delete recording ${id.slice(0, 8)}...?`)) return;
   try {
     const r = await fetch(`/recording/${id}`, { method: "DELETE" });
     if (!r.ok) {
@@ -1035,5 +1047,5 @@ refreshRecList();
 refreshRecDisk();
 setInterval(tickTimers, 1000);
 setInterval(refreshStatus, STATUS_REFRESH_INTERVAL_MS);
-setInterval(refreshRecStatus, 2000);
+setInterval(refreshRecStatus, RECORDING_STATUS_REFRESH_INTERVAL_MS);
 setInterval(refreshRecDisk, 15000);

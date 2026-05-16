@@ -11,9 +11,10 @@ All writes use WAL mode so concurrent readers on the dashboard never see a
 torn row. The database is created at :meth:`RecordingIndex.open` if missing
 and migrations are idempotent.
 
-Rows are never hard-deleted: delete moves the file to a ``.trash/<id>/``
-folder and flips ``state`` to ``deleted``. The dashboard filters these out
-by default but can surface them for recovery.
+Deletion is permanent: the API removes the capture file, sidecar, and index
+row. The ``deleted`` state remains in the schema only so older field databases
+can still be opened and purged after upgrading from the previous soft-delete
+behavior.
 """
 
 from __future__ import annotations
@@ -172,11 +173,8 @@ class RecordingIndex:
             (reason, recording_id),
         )
 
-    def soft_delete(self, recording_id: str, new_path: str) -> None:
-        self._exec(
-            "UPDATE recordings SET state='deleted', path=? WHERE id=?",
-            (new_path, recording_id),
-        )
+    def delete(self, recording_id: str) -> None:
+        self._exec("DELETE FROM recordings WHERE id=?", (recording_id,))
 
     def get(self, recording_id: str) -> RecordingRow | None:
         with self._cursor() as cur:

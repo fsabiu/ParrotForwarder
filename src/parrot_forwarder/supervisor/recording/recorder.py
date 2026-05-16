@@ -7,8 +7,8 @@ Design rules:
 - ffmpeg is the authoritative process. We stream-copy video + data; zero
   re-encode. Stopping ffmpeg cleanly (SIGINT) is the only way to get a valid
   MPEG-TS trailer.
-- The recorder is the sole writer of rows to the index except for the
-  ``deleted`` state transition (driven by the API layer).
+- The recorder is the sole writer of rows to the index except for permanent
+  deletion (driven by the API layer).
 - Crash recovery runs once at init: any row left in ``active`` state is
   reconciled against the filesystem and either finalized (file exists and is
   readable) or marked ``error``.
@@ -78,6 +78,7 @@ class ActiveRecording:
 
     recording_id: str
     path: str
+    filename: str
     started_at: str
     mission_id: str | None
     drone_id: str | None
@@ -91,6 +92,7 @@ class StoppedRecording:
 
     recording_id: str
     path: str
+    filename: str
     duration_s: int
     bytes: int
     sha256: str
@@ -213,6 +215,7 @@ class Recorder:
             self._active = ActiveRecording(
                 recording_id=recording_id,
                 path=str(full_path),
+                filename=full_path.name,
                 started_at=_iso(started_at),
                 mission_id=meta.mission_id,
                 drone_id=meta.drone_id,
@@ -273,6 +276,7 @@ class Recorder:
             result = StoppedRecording(
                 recording_id=active.recording_id,
                 path=str(path),
+                filename=path.name,
                 duration_s=duration_s,
                 bytes=bytes_,
                 sha256=sha,
@@ -318,6 +322,7 @@ class Recorder:
             "active": True,
             "recording_id": self._active.recording_id,
             "path": self._active.path,
+            "filename": self._active.filename,
             "started_at": self._active.started_at,
             "mission_id": self._active.mission_id,
             "drone_id": self._active.drone_id,
@@ -502,9 +507,7 @@ def _build_relative_path(
     drone = _safe_segment(drone_id) if drone_id else "drone"
     note = _safe_segment(notes) if notes else None
     iso_compact = started_at.strftime("%Y-%m-%dT%H-%M-%SZ")
-    filename_parts = [mission, drone]
-    if note:
-        filename_parts.append(note)
+    filename_parts = [note] if note else [mission, drone]
     filename_parts.append(iso_compact)
     filename = "_".join(filename_parts) + ".ts"
     return Path(date_part) / mission / filename
@@ -546,6 +549,7 @@ def _active_payload(active: ActiveRecording) -> dict[str, object]:
     return {
         "recording_id": active.recording_id,
         "path": active.path,
+        "filename": active.filename,
         "started_at": active.started_at,
         "mission_id": active.mission_id,
         "drone_id": active.drone_id,

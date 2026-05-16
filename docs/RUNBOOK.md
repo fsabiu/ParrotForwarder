@@ -80,7 +80,7 @@ Recording files:
 - On the Linux machine running Docker, find them under `ParrotForwarder/recordings/`.
 - Inside the container, the same directory is `/recordings`.
 - Active and finalized recordings are organized by date, typically `recordings/YYYY-MM-DD/default/<file>.ts`.
-- Deleted recordings are moved under `recordings/.trash/<recording-id>/`.
+- Deleted recordings are permanently removed from disk and from `index.db`.
 - Audit a finalized file with
   `scripts/field_check.sh audit-file recordings/<date>/<mission>/<file>.ts`.
   The report proves video continuity, KLV cadence, tag `120` presence,

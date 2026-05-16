@@ -10,7 +10,7 @@ Routes:
     GET     /recording/disk
     GET     /recording/{id}/metadata
     GET     /recording/{id}/download
-    DELETE  /recording/{id}               (soft delete, moves to .trash/)
+    DELETE  /recording/{id}               (permanent delete)
 
 Static paths (status, list, disk) are declared before the ``{recording_id}``
 wildcard so FastAPI matches them first.
@@ -54,9 +54,11 @@ class RecordingStartRequest(BaseModel):
 
 
 def _row_to_dict(row: RecordingRow) -> dict[str, object]:
+    path = Path(row.path)
     return {
         "id": row.id,
         "path": row.path,
+        "filename": path.name,
         "started_at": row.started_at,
         "stopped_at": row.stopped_at,
         "duration_s": row.duration_s,
@@ -100,6 +102,7 @@ def create_recording_router(
         return {
             "recording_id": active.recording_id,
             "path": active.path,
+            "filename": active.filename,
             "started_at": active.started_at,
             "mission_id": active.mission_id,
             "drone_id": active.drone_id,
@@ -116,6 +119,7 @@ def create_recording_router(
         return {
             "recording_id": result.recording_id,
             "path": result.path,
+            "filename": result.filename,
             "duration_s": result.duration_s,
             "bytes": result.bytes,
             "sha256": result.sha256,
@@ -191,20 +195,27 @@ def create_recording_router(
                 status_code=http_status.HTTP_409_CONFLICT,
                 detail="recording is still active; stop it first",
             )
-        trash_dir = root / ".trash" / recording_id
-        trash_dir.mkdir(parents=True, exist_ok=True)
-        old_path = Path(row.path)
-        new_path = trash_dir / old_path.name
+        recording_path = Path(row.path)
+        sidecar_path = recording_path.with_suffix(".meta.json")
+        deleted_paths: list[str] = []
+        missing_paths: list[str] = []
         try:
-            if old_path.exists():
-                old_path.rename(new_path)
-            old_sidecar = old_path.with_suffix(".meta.json")
-            if old_sidecar.exists():
-                old_sidecar.rename(trash_dir / old_sidecar.name)
+            for path in (recording_path, sidecar_path):
+                if path.exists() or path.is_symlink():
+                    path.unlink()
+                    deleted_paths.append(str(path))
+                else:
+                    missing_paths.append(str(path))
+            _prune_empty_parents(recording_path.parent, stop=root)
         except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"soft-delete failed: {exc}") from exc
-        index.soft_delete(recording_id, str(new_path))
-        return {"recording_id": recording_id, "path": str(new_path), "state": "deleted"}
+            raise HTTPException(status_code=500, detail=f"delete failed: {exc}") from exc
+        index.delete(recording_id)
+        return {
+            "recording_id": recording_id,
+            "state": "deleted",
+            "deleted_paths": deleted_paths,
+            "missing_paths": missing_paths,
+        }
 
     return router
 
@@ -215,10 +226,27 @@ def _download_filename(row: RecordingRow, path: Path) -> str:
     notes = _safe_segment(row.notes) if row.notes else None
     started = _started_at_compact(row.started_at)
 
-    parts = [part for part in (mission, drone, notes, started) if part]
+    if notes:
+        parts = [part for part in (notes, started) if part]
+    else:
+        parts = [part for part in (mission, drone, started) if part]
     if not parts:
         return path.name
     return "_".join(parts) + path.suffix
+
+
+def _prune_empty_parents(start: Path, *, stop: Path) -> None:
+    current = start
+    stop_resolved = stop.resolve()
+    while current != stop and current != current.parent:
+        current_resolved = current.resolve()
+        if not current_resolved.is_relative_to(stop_resolved):
+            return
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
 
 
 def _safe_segment(raw: str) -> str:

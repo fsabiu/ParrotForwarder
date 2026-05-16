@@ -154,6 +154,7 @@ def test_list_and_metadata_and_download(app_and_root) -> None:
         assert len(rows) == 1
         assert rows[0]["id"] == rid
         assert rows[0]["state"] == "finalized"
+        assert rows[0]["filename"].startswith("field_test_")
 
         # Metadata (reads sidecar + merges index).
         r = client.get(f"/recording/{rid}/metadata")
@@ -166,15 +167,12 @@ def test_list_and_metadata_and_download(app_and_root) -> None:
         r = client.get(f"/recording/{rid}/download")
         assert r.status_code == 200
         assert r.headers["content-type"] == "video/mp2t"
-        assert (
-            'filename="alpha_drone-01_field_test_'
-            in r.headers["content-disposition"]
-        )
+        assert 'filename="field_test_' in r.headers["content-disposition"]
         assert "controller-a" not in r.headers["content-disposition"]
         assert len(r.content) > 0
 
 
-def test_delete_moves_to_trash(app_and_root) -> None:
+def test_delete_removes_file_sidecar_and_index_row(app_and_root) -> None:
     app, root, _recorder, _index = app_and_root
     with TestClient(app) as client:
         r = client.post("/recording/start", json={})
@@ -183,26 +181,30 @@ def test_delete_moves_to_trash(app_and_root) -> None:
 
         time.sleep(0.2)
         client.post("/recording/stop")
+        rows = client.get("/recording/list").json()
+        assert len(rows) == 1
+        recording_path = Path(rows[0]["path"])
+        sidecar_path = recording_path.with_suffix(".meta.json")
+        assert recording_path.exists()
+        assert sidecar_path.exists()
 
-        # Cannot delete active (this is finalized already, just a sanity check).
         r = client.delete(f"/recording/{rid}")
         assert r.status_code == 200
         result = r.json()
         assert result["state"] == "deleted"
-        assert ".trash" in result["path"]
+        assert str(recording_path) in result["deleted_paths"]
+        assert str(sidecar_path) in result["deleted_paths"]
+        assert not recording_path.exists()
+        assert not sidecar_path.exists()
 
-        # File actually lives in trash now.
-        trash_path = Path(result["path"])
-        assert trash_path.exists()
-
-        # Default list excludes deleted.
         r = client.get("/recording/list")
         assert r.json() == []
 
-        # With include_deleted=true, it's visible.
         r = client.get("/recording/list?include_deleted=true")
-        assert len(r.json()) == 1
-        assert r.json()[0]["state"] == "deleted"
+        assert r.json() == []
+
+        r = client.get(f"/recording/{rid}/metadata")
+        assert r.status_code == 404
 
 
 def test_disk_endpoint(app_and_root) -> None:

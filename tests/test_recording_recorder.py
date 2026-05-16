@@ -267,10 +267,11 @@ def test_file_path_layout(
 
     path = asyncio.run(_go())
     parts = path.relative_to(root).parts
-    # <date>/<mission>/<mission>_<drone>_<notes>_<iso>.ts
+    # <date>/<mission>/<notes>_<iso>.ts
     assert parts[0].startswith("20")  # YYYY-...
     assert parts[1] == "alpha"
-    assert parts[2].startswith("alpha_anafi42_field_test_")
+    assert parts[2].startswith("field_test_")
+    assert "anafi42" not in parts[2]
     assert "controller-a" not in parts[2]
     assert parts[2].endswith(".ts")
 
