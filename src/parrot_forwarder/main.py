@@ -31,6 +31,7 @@ class ParrotForwarder:
                  srt_port=8890, klv_port_start=12345, auto_reconnect=True,
                  health_check_interval=5, video_stats_interval=30,
                  video_ip: str | None = None,
+                 include_raw_sdk_state_in_klv: bool = False,
                  drone_factory: Optional[Callable[[str], Any]] = None,
                  install_signal_handlers: bool = True):
         """
@@ -47,6 +48,8 @@ class ParrotForwarder:
             video_stats_interval: Seconds between video status reports (default: 30)
             video_ip: Optional RTSP endpoint when video is exposed on a
                 different address than control/telemetry.
+            include_raw_sdk_state_in_klv: Include raw Olympe state/event
+                snapshots in tag 120. Disabled by default to keep SRT compact.
             drone_factory: Callable ``(ip) -> drone`` used to build the Olympe
                 handle. Defaults to an internal factory that lazily imports
                 Olympe. Tests inject ``MockDrone`` (or a partially-applied
@@ -75,6 +78,7 @@ class ParrotForwarder:
         
         # Stats settings
         self.video_stats_interval = video_stats_interval
+        self.include_raw_sdk_state_in_klv = include_raw_sdk_state_in_klv
         
         # Dependency injection point for the Olympe Drone.
         self._drone_factory: Callable[[str], Any] = drone_factory or _default_drone_factory
@@ -271,6 +275,7 @@ class ParrotForwarder:
         self.logger.info(f"  Video IP: {self.video_ip}")
         self.logger.info(f"  Telemetry FPS: {self.telemetry_fps}")
         self.logger.info(f"  Telemetry Format: KLV (MISB 0601) -> localhost:{self.klv_port}")
+        self.logger.info(f"  Raw SDK state in KLV: {self.include_raw_sdk_state_in_klv}")
         self.logger.info(f"  Video FPS: {self.video_fps} (streaming at original drone framerate)")
         self.logger.info(f"  Output: Unified SRT stream (video + KLV) on port {self.srt_port}")
         self.logger.info(f"  Client command: ffplay 'srt://<your-ip>:{self.srt_port}'")
@@ -291,7 +296,8 @@ class ParrotForwarder:
         self.telemetry_forwarder = TelemetryForwarder(
             self.drone,
             self.telemetry_fps,
-            self.klv_port
+            self.klv_port,
+            include_raw_sdk_state_in_klv=self.include_raw_sdk_state_in_klv,
         )
         self.video_forwarder = VideoForwarder(
             self.video_ip,

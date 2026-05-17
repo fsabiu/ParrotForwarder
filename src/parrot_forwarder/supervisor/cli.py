@@ -170,6 +170,7 @@ def _worker_process_config_from(config: Config, backend: str) -> WorkerProcessCo
         video_ip=config.drone.video_ip,
         device_kind=config.drone.device_kind,
         telemetry_fps=config.forwarder.telemetry_fps,
+        include_raw_sdk_state_in_klv=config.forwarder.include_raw_sdk_state_in_klv,
         video_fps=config.forwarder.video_fps,
         srt_port=config.forwarder.srt_port,
         klv_port=config.forwarder.klv_port,

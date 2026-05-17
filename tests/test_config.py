@@ -48,6 +48,7 @@ def yaml_file(tmp_path: Path) -> Path:
           srt_port: 9000
           klv_port: 12400
           telemetry_fps: 20
+          include_raw_sdk_state_in_klv: true
           video_fps: 30
         supervisor:
           http:
@@ -104,6 +105,7 @@ def test_defaults_when_no_layers_provided() -> None:
     assert cfg.forwarder.srt_port == 8890
     assert cfg.forwarder.klv_port == 12345
     assert cfg.forwarder.telemetry_fps == 30
+    assert cfg.forwarder.include_raw_sdk_state_in_klv is False
     assert cfg.supervisor.http.bind == "127.0.0.1"
     assert cfg.supervisor.http.port == 8080
     assert cfg.supervisor.auto_start is True
@@ -135,6 +137,7 @@ def test_valid_yaml_maps_to_model(yaml_file: Path) -> None:
     assert cfg.drone.device_kind == "drone"
     assert cfg.forwarder.srt_port == 9000
     assert cfg.forwarder.telemetry_fps == 20
+    assert cfg.forwarder.include_raw_sdk_state_in_klv is True
     assert cfg.supervisor.http.port == 8081
     assert cfg.supervisor.auto_start is False
     assert cfg.supervisor.backoff.max_seconds == 120.0

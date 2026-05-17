@@ -24,6 +24,7 @@ class RuntimeConfig:
     video_ip: str | None = None
     device_kind: Literal["drone", "skycontroller"] = "drone"
     telemetry_fps: int = 30
+    include_raw_sdk_state_in_klv: bool = False
     video_fps: int = 30
     srt_port: int = 8890
     klv_port: int = 12345
@@ -393,6 +394,7 @@ class V1ForwarderRuntime:
             auto_reconnect=False,
             health_check_interval=int(self.config.connect_retry_interval),
             video_stats_interval=self.config.video_stats_interval,
+            include_raw_sdk_state_in_klv=self.config.include_raw_sdk_state_in_klv,
             drone_factory=_make_olympe_factory(self.config.device_kind),
             install_signal_handlers=False,
         )

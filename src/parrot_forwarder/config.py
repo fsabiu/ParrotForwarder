@@ -78,6 +78,10 @@ class ForwarderConfig(BaseModel):
         description="Local UDP port for KLV; auto-incremented by runtime if busy",
     )
     telemetry_fps: int = Field(default=30, ge=1, le=100, description="Telemetry/KLV rate (Hz)")
+    include_raw_sdk_state_in_klv: bool = Field(
+        default=False,
+        description="Include raw Olympe state/event snapshots in tag 120 KLV JSON",
+    )
     video_fps: int = Field(
         default=30,
         ge=1,

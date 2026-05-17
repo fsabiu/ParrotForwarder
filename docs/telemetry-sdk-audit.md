@@ -26,12 +26,15 @@ produce a passive state/event already listed below.
 ## Implementation Notes
 
 - `TelemetryForwarder` calls `Drone.query_state("")` on every telemetry sample
-  and publishes the sanitized raw SDK cache as `olympe_state` in KLV tag `120`.
+  and records the SDK cache size as `olympe_state_count`.
 - Stable detector fields are still extracted with `get_state()` so units,
   fallbacks, and validity flags stay explicit and backward compatible.
 - Sticky event subscribers cover event-only telemetry such as gimbal attitude
-  and RSSI; their sanitized last-known payloads are published as
-  `olympe_event_state`.
+  and RSSI.
+- Normal e2e KLV omits the full sanitized `olympe_state` and
+  `olympe_event_state` payloads from tag `120` to keep the SRT stream compact.
+  They can be re-enabled for short debug captures with
+  `forwarder.include_raw_sdk_state_in_klv: true`.
 - The telemetry sample is the source of truth. The supervisor WebSocket
   groups that sample for the dashboard, while KLV tag `120` carries the same
   complete sample to the detector.
@@ -75,8 +78,10 @@ produce a passive state/event already listed below.
 - Record representative tag `120` packet size with live hardware and confirm
   KLV UDP/SRT muxing stays stable at the configured 30 Hz cadence.
 - Decode tag `120` from the SRT stream and confirm `contract_version`.
-- Confirm `olympe_state_count > 0`, `olympe_state` contains SDK message-name
-  keys, and `olympe_event_state` updates after gimbal/camera/RSSI events.
+- Confirm compact e2e KLV includes `olympe_state_count > 0` and omits
+  `olympe_state` / `olympe_event_state`; run one short debug capture with
+  `forwarder.include_raw_sdk_state_in_klv: true` only when raw SDK evidence is
+  needed.
 - Confirm `position_valid=false` and null published coordinates while GPS is
   unavailable; hardcoded fallback coordinates are not accepted.
 - Confirm valid GPS, altitude, attitude, speed, gimbal, camera, signal, storage,

@@ -83,6 +83,13 @@ sample may contain:
   subscribed by ParrotForwarder, including gimbal, camera, storage, and RSSI
   events that are not always available through `get_state()`.
 
+Normal e2e KLV uses compact tag `120`: `olympe_state_count` remains present,
+but `olympe_state` and `olympe_event_state` are omitted from the 30 Hz KLV
+payload to avoid spending most of the SRT bitrate on repeated raw SDK evidence.
+Set `forwarder.include_raw_sdk_state_in_klv: true` only for short debug
+captures that need full raw SDK state in the MPEG-TS/SRT stream. Dashboard and
+consumer logic must not require these raw fields.
+
 ## Required Detector Semantics
 
 - Use `position_valid=true` before trusting `position_latitude` and
@@ -130,7 +137,7 @@ runtime:
 | Camera recording | `camera_recording_cam_id`, `camera_recording_available`, `camera_recording_state`, `camera_recording_start_timestamp_ms`, `camera_recording_start_time` |
 | Storage / product | `storage_free_space_mb`, `storage_recording_time_remaining_min`, `storage_photo_remaining`, `product_name`, `product_software_version`, `product_hardware_version` |
 | Motor stats | `motor_total_flights`, `motor_last_flight_duration_s`, `motor_total_flight_duration_s` |
-| Raw SDK completeness evidence | `olympe_state_count`, `olympe_state`, `olympe_event_state` |
+| Raw SDK completeness evidence | `olympe_state_count`; optional debug-only `olympe_state`, `olympe_event_state` |
 
 Any future ParrotForwarder field added to the telemetry sample is automatically
 carried by tag `120`. If detector logic depends on a new field, this file must

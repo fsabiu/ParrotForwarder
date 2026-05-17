@@ -25,6 +25,7 @@ async def test_subprocess_worker_factory_streams_mock_worker_events() -> None:
             video_ip=None,
             device_kind="drone",
             telemetry_fps=10,
+            include_raw_sdk_state_in_klv=False,
             video_fps=30,
             srt_port=8890,
             klv_port=12345,

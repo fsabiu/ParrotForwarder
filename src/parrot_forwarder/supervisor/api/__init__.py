@@ -10,7 +10,10 @@ every request/response for log correlation.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
+import struct
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, cast
@@ -38,6 +41,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
+_TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_VIRTUALBOX_NAT = ipaddress.ip_network("10.0.2.0/24")
+_DOCKER_BRIDGE = ipaddress.ip_network("172.17.0.0/16")
+_PARROT_DEVICE_LINK = ipaddress.ip_network("192.168.53.0/24")
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +198,132 @@ def _unhandled_exception_to_problem(request: Request, exc: Exception) -> JSONRes
     )
 
 
+def _address_kind(address: str) -> str:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return "host"
+    if ip.is_loopback:
+        return "loopback"
+    if ip.version == 4 and ip in _TAILSCALE_CGNAT:
+        return "overlay"
+    if ip.version == 4 and ip in _PARROT_DEVICE_LINK:
+        return "device"
+    if ip.version == 4 and ip in _VIRTUALBOX_NAT:
+        return "nat"
+    if ip.version == 4 and ip in _DOCKER_BRIDGE:
+        return "internal"
+    if ip.is_private:
+        return "local"
+    return "public"
+
+
+def _address_priority(item: dict[str, str]) -> tuple[int, str, str]:
+    order = {
+        "local": 0,
+        "overlay": 1,
+        "host": 2,
+        "loopback": 3,
+        "nat": 4,
+        "device": 5,
+        "internal": 6,
+        "public": 7,
+    }
+    return (order.get(item["kind"], 99), item["interface"], item["address"])
+
+
+def _host_ipv4_addresses() -> list[dict[str, str]]:
+    """Return non-loopback IPv4 addresses visible from the host OS."""
+
+    addresses: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    try:
+        import fcntl
+
+        for _, if_name in socket.if_nameindex():
+            if_req = struct.pack("256s", if_name.encode("utf-8")[:15])
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                try:
+                    result = fcntl.ioctl(sock.fileno(), 0x8915, if_req)
+                except OSError:
+                    continue
+            address = socket.inet_ntoa(result[20:24])
+            if address.startswith("127.") or address in seen:
+                continue
+            seen.add(address)
+            addresses.append(
+                {
+                    "address": address,
+                    "interface": if_name,
+                    "kind": _address_kind(address),
+                }
+            )
+    except Exception:
+        pass
+
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            address = info[4][0]
+            if address.startswith("127.") or address in seen:
+                continue
+            seen.add(address)
+            addresses.append(
+                {
+                    "address": address,
+                    "interface": "hostname",
+                    "kind": _address_kind(address),
+                }
+            )
+    except OSError:
+        pass
+
+    return sorted(addresses, key=_address_priority)
+
+
+def _dashboard_endpoint_metadata(cfg: Config, request: Request) -> dict[str, object]:
+    port = cfg.supervisor.http.port
+    current_url = str(request.base_url).rstrip("/")
+    scheme = cfg.field.dashboard_scheme
+    advertised_host = cfg.field.advertised_dashboard_host or cfg.field.tailscale_host
+    advertised_port = cfg.field.advertised_dashboard_port or port
+    advertised_url = (
+        f"{scheme}://{advertised_host}:{advertised_port}"
+        if advertised_host
+        else None
+    )
+
+    urls = []
+    has_virtualbox_nat = False
+    for address in _host_ipv4_addresses():
+        has_virtualbox_nat = has_virtualbox_nat or address["kind"] == "nat"
+        urls.append(
+            {
+                **address,
+                "url": f"{scheme}://{address['address']}:{port}",
+            }
+        )
+
+    host_urls = []
+    if has_virtualbox_nat:
+        host_urls.append(
+            {
+                "address": "127.0.0.1",
+                "interface": "virtualbox-nat-forward",
+                "kind": "host",
+                "url": f"{scheme}://127.0.0.1:{port}",
+            }
+        )
+
+    return {
+        "current_url": current_url,
+        "advertised_url": advertised_url,
+        "host_urls": host_urls,
+        "urls": urls,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -202,7 +335,7 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
         return HealthResponse()
 
     @app.get("/status", response_model=StatusResponse, summary="Current state snapshot")
-    async def _status() -> StatusResponse:
+    async def _status(request: Request) -> StatusResponse:
         sm = supervisor.state_machine
         cfg = cast("Config | None", getattr(app.state, "config", None))
         recorder = getattr(app.state, "recorder", None)
@@ -210,6 +343,7 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
         if cfg is not None:
             runtime["forwarder"] = {
                 "telemetry_fps": cfg.forwarder.telemetry_fps,
+                "include_raw_sdk_state_in_klv": cfg.forwarder.include_raw_sdk_state_in_klv,
                 "video_fps": cfg.forwarder.video_fps,
                 "srt_port": cfg.forwarder.srt_port,
                 "klv_port": cfg.forwarder.klv_port,
@@ -221,6 +355,7 @@ def _register_routes(app: FastAPI, supervisor: Supervisor) -> None:
                 "advertised_dashboard_port": cfg.field.advertised_dashboard_port,
                 "tailscale_host": cfg.field.tailscale_host,
             }
+            runtime["dashboard"] = _dashboard_endpoint_metadata(cfg, request)
         latest_metrics = getattr(app.state, "latest_heartbeat_metrics", None)
         if isinstance(latest_metrics, dict):
             runtime["latest_heartbeat_metrics"] = latest_metrics

@@ -280,6 +280,20 @@ dd {
   word-break: break-word;
 }
 
+.link-list {
+  overflow-wrap: anywhere;
+}
+
+.link-list a {
+  color: var(--text);
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.16rem;
+}
+
+.link-list a:hover {
+  color: var(--accent);
+}
+
 .preview-frame {
   position: relative;
   width: 100%;

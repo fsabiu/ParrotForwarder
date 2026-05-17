@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+import parrot_forwarder.supervisor.api as api_module
 from parrot_forwarder import ipc as ipc_module
 from parrot_forwarder.config import Config
 from parrot_forwarder.state_machine import State
@@ -108,6 +109,71 @@ async def test_status_exposes_runtime_config_and_latest_metrics(
     assert runtime["forwarder"]["telemetry_fps"] == 30
     assert runtime["forwarder"]["srt_port"] == 8890
     assert runtime["latest_heartbeat_metrics"]["telemetry_actual_hz"] == 29.5
+
+
+async def test_status_exposes_dashboard_endpoint_metadata(
+    supervisor: Supervisor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        api_module,
+        "_host_ipv4_addresses",
+        lambda: [
+            {"address": "192.168.1.134", "interface": "enp0s8", "kind": "local"},
+            {"address": "10.0.2.15", "interface": "enp0s3", "kind": "nat"},
+            {"address": "192.168.53.17", "interface": "usb0", "kind": "device"},
+            {"address": "100.105.206.55", "interface": "tailscale0", "kind": "overlay"},
+        ],
+    )
+    client = TestClient(create_app(supervisor, Config()))
+
+    response = client.get("/status")
+
+    assert response.status_code == 200
+    dashboard = response.json()["runtime"]["dashboard"]
+    assert dashboard["current_url"] == "http://testserver"
+    assert dashboard["host_urls"] == [
+        {
+            "address": "127.0.0.1",
+            "interface": "virtualbox-nat-forward",
+            "kind": "host",
+            "url": "http://127.0.0.1:8080",
+        }
+    ]
+    assert dashboard["urls"] == [
+        {
+            "address": "192.168.1.134",
+            "interface": "enp0s8",
+            "kind": "local",
+            "url": "http://192.168.1.134:8080",
+        },
+        {
+            "address": "10.0.2.15",
+            "interface": "enp0s3",
+            "kind": "nat",
+            "url": "http://10.0.2.15:8080",
+        },
+        {
+            "address": "192.168.53.17",
+            "interface": "usb0",
+            "kind": "device",
+            "url": "http://192.168.53.17:8080",
+        },
+        {
+            "address": "100.105.206.55",
+            "interface": "tailscale0",
+            "kind": "overlay",
+            "url": "http://100.105.206.55:8080",
+        },
+    ]
+
+
+def test_dashboard_address_classification_excludes_operator_unreachable_links() -> None:
+    assert api_module._address_kind("192.168.1.134") == "local"
+    assert api_module._address_kind("172.20.10.12") == "local"
+    assert api_module._address_kind("100.105.206.55") == "overlay"
+    assert api_module._address_kind("10.0.2.15") == "nat"
+    assert api_module._address_kind("192.168.53.17") == "device"
+    assert api_module._address_kind("172.17.0.1") == "internal"
 
 
 async def test_config_endpoint_returns_backoff_shape(client: TestClient) -> None:

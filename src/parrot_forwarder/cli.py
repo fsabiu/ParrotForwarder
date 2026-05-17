@@ -50,6 +50,11 @@ def parse_args():
         help='Frames per second for telemetry forwarding'
     )
     parser.add_argument(
+        '--include-raw-sdk-state-in-klv',
+        action='store_true',
+        help='Include raw Olympe state/event snapshots in tag 120 KLV JSON'
+    )
+    parser.add_argument(
         '--video-fps',
         type=int,
         default=30,
@@ -123,7 +128,8 @@ def main():
             srt_port=args.srt_port,
             auto_reconnect=not args.no_auto_reconnect,
             health_check_interval=args.health_check_interval,
-            video_stats_interval=args.video_stats_interval
+            video_stats_interval=args.video_stats_interval,
+            include_raw_sdk_state_in_klv=args.include_raw_sdk_state_in_klv,
         )
         
         forwarder.run(
