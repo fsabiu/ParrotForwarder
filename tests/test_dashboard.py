@@ -56,6 +56,8 @@ def test_dashboard_index_served(client: TestClient) -> None:
     assert "dashboard-overlay-urls" in response.text
     assert "Host Mac" in response.text
     assert "Local VM" in response.text
+    assert "Height fields" in response.text
+    assert "source-altitudes" in response.text
     assert 'data-theme-choice="dark"' in response.text
     assert 'data-theme-choice="light"' in response.text
     assert 'data-theme-choice="sun"' in response.text
@@ -85,6 +87,10 @@ def test_dashboard_js_served(client: TestClient) -> None:
     assert "renderDashboardUrls" in response.text
     assert "dashboard-host-urls" in response.text
     assert "dashboard-local-urls" in response.text
+    assert "source-altitudes" in response.text
+    assert 'setField("source-altitudes", fmtAltitudes(position));' in response.text
+    assert 'setField("position-source", position.source || "-");' in response.text
+    assert '"position-altitudes"' not in response.text
     assert "/stream/events" in response.text
     assert "state.telemetryHz" in response.text
     assert "preview-frame" in response.text
