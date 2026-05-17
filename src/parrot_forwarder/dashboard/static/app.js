@@ -35,7 +35,7 @@ const TELEMETRY_FIELDS = [
   "position-source",
   "position-message",
   "position-coords",
-  "position-altitudes",
+  "source-altitudes",
   "position-accuracy",
   "home-coords",
   "klv-coords",
@@ -413,13 +413,25 @@ function sanitizedTelemetryForDisplay(payload) {
   const clone = JSON.parse(JSON.stringify(payload));
   const position = clone.position || {};
   if (!hasDisplayablePosition(clone, position)) {
-    delete clone.position;
+    if (clone.position && typeof clone.position === "object") {
+      for (const key of [
+        "altitude_msl_m",
+        "ground_altitude_msl_m",
+        "home",
+        "klv",
+        "latitude",
+        "longitude",
+        "raw",
+      ]) {
+        delete clone.position[key];
+      }
+      if (Object.keys(clone.position).length === 0) {
+        delete clone.position;
+      }
+    }
     if (clone.raw && typeof clone.raw === "object") {
       for (const key of [
         "altitude",
-        "altitude_agl",
-        "altitude_relative_takeoff_m",
-        "altitude_takeoff_m",
         "gps_location_altitude_msl_raw",
         "gps_location_latitude_raw",
         "gps_location_longitude_raw",
@@ -679,14 +691,14 @@ function renderTelemetry(payload, sampleTime) {
   // don't overwrite with the raw ISO timestamp here (caused a 1 Hz flicker
   // between the timestamp and "0s ago").
 
-  setField("position-source", showPosition ? position.source || "-" : "-");
-  setField("position-message", showPosition ? position.message || "-" : "-");
+  setField("position-source", position.source || "-");
+  setField("position-message", position.message || "-");
   setField(
     "position-coords",
     showPosition ? fmtCoords(position.latitude, position.longitude, 4) : "-"
   );
-  setField("position-altitudes", showPosition ? fmtAltitudes(position) : "-");
-  setField("position-accuracy", showPosition ? fmtAccuracy(position) : "-");
+  setField("source-altitudes", fmtAltitudes(position));
+  setField("position-accuracy", fmtAccuracy(position));
   setField(
     "home-coords",
     showPosition ? fmtCoords(position.home?.latitude, position.home?.longitude, 4) : "-"

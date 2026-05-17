@@ -15,8 +15,8 @@ plus one KLV data stream. The KLV stream carries both the compatibility MISB
   in-memory cadence and requests a controlled worker reset when active.
 - Ordering: KLV packets are append-only samples. `timestamp_us` and `sequence`
   must be treated as the primary ordering keys.
-- No live-drone evidence is claimed by this contract until a hardware run is
-  recorded in the WP-03 evidence file.
+- Live-drone evidence is recorded in the WP-03 evidence file. The latest
+  compact-mode evidence from 2026-05-17 is summarized below.
 
 ## KLV Local Set
 
@@ -89,6 +89,165 @@ payload to avoid spending most of the SRT bitrate on repeated raw SDK evidence.
 Set `forwarder.include_raw_sdk_state_in_klv: true` only for short debug
 captures that need full raw SDK state in the MPEG-TS/SRT stream. Dashboard and
 consumer logic must not require these raw fields.
+
+## Latest Live Compact Evidence
+
+The latest current-version live evidence was captured on 2026-05-17 with the
+dashboard closed and one detector SRT consumer. It decoded `3881` tag `120`
+payloads at `29.948 Hz`. The total MPEG-TS/SRT-equivalent bitrate was
+`6.118 Mbps` / `0.765 MB/s`; KLV/tag `120` was `0.903 Mbps` / `0.113 MB/s`;
+video plus MPEG-TS overhead was `5.215 Mbps` / `0.652 MB/s`. Compared with the
+pre-compact clean baseline, total bandwidth dropped by `7.260 Mbps` (`54.3%`)
+and KLV/tag `120` dropped by `7.120 Mbps` (`88.7%`).
+
+The decoded KLV local-set tags in that run were `2`, `5`, `6`, `7`, `16`,
+`17`, `21`, `22`, `23`, `102`, `103`, `104`, `105`, `106`, `107`, and `120`.
+Tags `13`, `14`, and `15` are intentionally omitted when `position_valid=false`
+because no trusted latitude, longitude, or MSL altitude is available.
+
+Detector/geolocation tests this week should explicitly verify the following
+tag `120` fields against outdoor data:
+
+- GPS gate: `position_valid`, `gps_fix`, `position_latitude`,
+  `position_longitude`, `position_altitude_msl`, and `position_is_default`.
+- Height fields: `altitude_agl`, `altitude_relative_takeoff_m`,
+  `altitude_takeoff_m`, and, when GPS is valid, `ground_altitude_msl`.
+- Camera/geolocation fields: `heading_deg`, `roll_deg`, `pitch_deg`,
+  `yaw_deg`, `gimbal_*_abs`, `gimbal_*_rel`, `camera_h_fov_deg`,
+  `camera_v_fov_deg`, `camera_focal_length_mm`, and `camera_zoom_level`.
+
+This is a real compact tag `120` JSON payload decoded from the current live
+evidence. It is an indoor/no-GPS sample, so coordinates and MSL altitude are
+`null`; the height-above-ground and takeoff-relative fields are still present.
+
+```json
+{
+  "contract_version": "aion.parrot.telemetry.v1",
+  "sequence": 10771,
+  "source": "parrot_forwarder",
+  "source_id": "anafi_g032304",
+  "source_name": "ANAFI-G032304",
+  "telemetry": {
+    "alert_state": "none",
+    "altitude": null,
+    "altitude_agl": 3.5,
+    "altitude_relative_takeoff_m": 0.0,
+    "altitude_takeoff_m": 0.0,
+    "battery_percent": 73,
+    "cam_align_max_pitch": null,
+    "cam_align_max_roll": null,
+    "cam_align_max_yaw": null,
+    "cam_align_min_pitch": null,
+    "cam_align_min_roll": null,
+    "cam_align_min_yaw": null,
+    "cam_align_pitch": null,
+    "cam_align_roll": null,
+    "cam_align_yaw": null,
+    "camera_focal_length": 23.0,
+    "camera_focal_length_base": 23.0,
+    "camera_focal_length_base_mm": 23.0,
+    "camera_focal_length_mm": 23.0,
+    "camera_h_fov_deg": 76.09408506365217,
+    "camera_recording_available": null,
+    "camera_recording_start_timestamp_ms": null,
+    "camera_recording_state": null,
+    "camera_sensor_height": 4.7,
+    "camera_sensor_height_mm": 4.7,
+    "camera_sensor_width": 6.3,
+    "camera_sensor_width_mm": 6.3,
+    "camera_v_fov_deg": 60.55711817004386,
+    "camera_zoom_level": 1.0,
+    "flying_state": "landed",
+    "gimbal_attitude_updated_at": "2026-05-17T08:45:44.366Z",
+    "gimbal_id": 0,
+    "gimbal_offset_max_pitch": null,
+    "gimbal_offset_max_roll": null,
+    "gimbal_offset_max_yaw": null,
+    "gimbal_offset_min_pitch": null,
+    "gimbal_offset_min_roll": null,
+    "gimbal_offset_min_yaw": null,
+    "gimbal_offset_pitch": null,
+    "gimbal_offset_roll": null,
+    "gimbal_offset_update_state": null,
+    "gimbal_offset_yaw": null,
+    "gimbal_pitch_abs": 11.728273391723633,
+    "gimbal_pitch_frame_of_reference": "absolute",
+    "gimbal_pitch_rel": 11.728273391723633,
+    "gimbal_roll_abs": 0.0000010695001719795982,
+    "gimbal_roll_frame_of_reference": "absolute",
+    "gimbal_roll_rel": -5.3690905055248095e-9,
+    "gimbal_yaw_abs": -101.267578125,
+    "gimbal_yaw_frame_of_reference": "relative",
+    "gimbal_yaw_rel": -0.0000553164463781286,
+    "gps_fix": false,
+    "gps_fixed": false,
+    "gps_location_altitude_msl_raw": 500.0,
+    "gps_location_latitude_raw": 500.0,
+    "gps_location_longitude_raw": 500.0,
+    "heading_deg": 258.7330403840739,
+    "home_altitude_msl": 500.0,
+    "hovering_warning_no_gps_too_dark": true,
+    "hovering_warning_no_gps_too_high": false,
+    "latitude": null,
+    "link_quality_4g_interference": false,
+    "link_quality_bits": 5,
+    "link_quality_external_perturbation": false,
+    "link_quality_level": 5,
+    "longitude": null,
+    "motor_last_flight_duration_s": 58,
+    "motor_total_flight_duration_s": 10634,
+    "motor_total_flights": 65,
+    "olympe_state_count": 170,
+    "pitch": 0.07345602661371231,
+    "pitch_deg": 4.208720304766367,
+    "platform_altitude_msl": null,
+    "position_altitude_accuracy_m": 14.0,
+    "position_altitude_msl": null,
+    "position_changed_altitude_msl_raw": 500.0,
+    "position_changed_latitude_raw": 500.0,
+    "position_changed_longitude_raw": 500.0,
+    "position_is_default": false,
+    "position_latitude": null,
+    "position_latitude_accuracy_m": 14.0,
+    "position_longitude": null,
+    "position_longitude_accuracy_m": 14.0,
+    "position_message": "gps_fix_unavailable",
+    "position_source": "invalid",
+    "position_valid": false,
+    "product_hardware_version": "HW_03",
+    "product_name": "ANAFI-G032304",
+    "product_software_version": "1.8.2",
+    "return_home_min_altitude_m": 30.0,
+    "return_home_min_altitude_max_m": 100.0,
+    "return_home_min_altitude_min_m": 20.0,
+    "return_home_reason": "disabled",
+    "return_home_state": "unavailable",
+    "roll": 0.004881664644926786,
+    "roll_deg": 0.27969878115253444,
+    "rssi_dbm": -34.0,
+    "sensor_h_fov": 76.09408506365217,
+    "sensor_v_fov": 60.55711817004386,
+    "sequence": 10771,
+    "source_id": "anafi_g032304",
+    "source_name": "ANAFI-G032304",
+    "speed_horizontal_mps": 0.0,
+    "speed_total_mps": 0.0,
+    "speed_x": 0.0,
+    "speed_y": -0.0,
+    "speed_z": 0.0,
+    "telemetry_hz": 30,
+    "telemetry_target_hz": 30,
+    "timestamp": "2026-05-17T08:45:44.561Z",
+    "timestamp_us": 1779007544561000,
+    "vibration_level": "ok",
+    "wind_state": "ok",
+    "yaw": -1.7674418687820435,
+    "yaw_deg": -101.26695961592614
+  },
+  "timestamp": "2026-05-17T08:45:44.561Z",
+  "timestamp_us": 1779007544561000
+}
+```
 
 ## Required Detector Semantics
 
