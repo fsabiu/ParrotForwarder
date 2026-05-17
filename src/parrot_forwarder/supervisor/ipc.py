@@ -35,6 +35,7 @@ class WorkerProcessConfig:
     video_ip: str | None
     device_kind: str
     telemetry_fps: int
+    include_raw_sdk_state_in_klv: bool
     video_fps: int
     srt_port: int
     klv_port: int
@@ -58,6 +59,8 @@ class WorkerProcessConfig:
             self.device_kind,
             "--telemetry-fps",
             str(self.telemetry_fps),
+            "--include-raw-sdk-state-in-klv",
+            "true" if self.include_raw_sdk_state_in_klv else "false",
             "--video-fps",
             str(self.video_fps),
             "--srt-port",

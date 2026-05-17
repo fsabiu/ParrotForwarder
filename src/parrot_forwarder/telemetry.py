@@ -174,7 +174,14 @@ class TelemetryForwarder(threading.Thread):
     Forwards telemetry as KLV (MISB 0601) over UDP to localhost for FFmpeg to consume.
     """
     
-    def __init__(self, drone, fps=30, klv_port=12345, name="TelemetryForwarder"):
+    def __init__(
+        self,
+        drone,
+        fps=30,
+        klv_port=12345,
+        name="TelemetryForwarder",
+        include_raw_sdk_state_in_klv=False,
+    ):
         """
         Initialize the telemetry forwarder.
         
@@ -183,11 +190,14 @@ class TelemetryForwarder(threading.Thread):
             fps: Frames per second for telemetry updates
             klv_port: Local UDP port for KLV data (for FFmpeg to consume)
             name: Thread name
+            include_raw_sdk_state_in_klv: Include raw Olympe state/event
+                snapshots in tag 120. Disabled by default to keep SRT compact.
         """
         super().__init__(name=name, daemon=True)
         self.drone = drone
         self.fps = fps
         self.interval = 1.0 / fps
+        self.include_raw_sdk_state_in_klv = include_raw_sdk_state_in_klv
         self.running = False
         self.telemetry_count = 0
         self.logger = logging.getLogger(f"{__name__}.{name}")
@@ -707,7 +717,10 @@ class TelemetryForwarder(threading.Thread):
                 telemetry["timestamp_us"] = None
 
             # Encode telemetry to KLV using our custom encoder
-            klv_packet = encode_telemetry_to_klv(telemetry)
+            klv_packet = encode_telemetry_to_klv(
+                telemetry,
+                include_raw_sdk_state=self.include_raw_sdk_state_in_klv,
+            )
 
             if not klv_packet:
                 self.send_errors += 1

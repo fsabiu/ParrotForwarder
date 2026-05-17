@@ -109,6 +109,47 @@ function setField(id, value = "-") {
   if (node) node.textContent = value;
 }
 
+function setLinkList(id, urls = []) {
+  const node = el(id);
+  if (!node) return;
+  node.replaceChildren();
+  const values = urls.filter((item) => item?.url);
+  if (values.length === 0) {
+    node.textContent = "-";
+    return;
+  }
+  node.classList.add("link-list");
+  values.forEach((item, index) => {
+    if (index > 0) node.append(document.createTextNode(" | "));
+    const anchor = document.createElement("a");
+    anchor.href = item.url;
+    anchor.textContent = item.url;
+    anchor.target = "_blank";
+    anchor.rel = "noreferrer";
+    node.append(anchor);
+  });
+}
+
+function renderDashboardUrls(dashboard = {}) {
+  setLinkList("dashboard-url", [{ url: dashboard.current_url }]);
+  const candidates = Array.isArray(dashboard.urls) ? dashboard.urls : [];
+  setLinkList(
+    "dashboard-host-urls",
+    Array.isArray(dashboard.host_urls) ? dashboard.host_urls : []
+  );
+  setLinkList(
+    "dashboard-local-urls",
+    candidates.filter((item) => item.kind === "local")
+  );
+  setLinkList(
+    "dashboard-overlay-urls",
+    [
+      ...(dashboard.advertised_url ? [{ url: dashboard.advertised_url }] : []),
+      ...candidates.filter((item) => item.kind === "overlay"),
+    ]
+  );
+}
+
 function syncTelemetryJsonHeight() {
   const rawPanel = document.querySelector(".raw");
   const previewFrame = document.querySelector(".preview-frame");
@@ -421,6 +462,7 @@ async function refreshStatus() {
     setState(body.state);
     setField("restarts", body.restarts_total ?? 0);
     setField("failures", body.consecutive_failures ?? 0);
+    renderDashboardUrls(body.runtime?.dashboard || {});
   } catch (err) {
     console.warn("status fetch failed", err);
   }

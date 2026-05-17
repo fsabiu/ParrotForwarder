@@ -210,6 +210,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default="drone",
     )
     parser.add_argument("--telemetry-fps", type=int, default=30)
+    parser.add_argument(
+        "--include-raw-sdk-state-in-klv",
+        choices=("true", "false"),
+        default="false",
+    )
     parser.add_argument("--video-fps", type=int, default=30)
     parser.add_argument("--srt-port", type=int, default=8890)
     parser.add_argument("--klv-port", type=int, default=12345)
@@ -240,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
                     video_ip=args.video_ip,
                     device_kind=args.device_kind,
                     telemetry_fps=args.telemetry_fps,
+                    include_raw_sdk_state_in_klv=(
+                        args.include_raw_sdk_state_in_klv == "true"
+                    ),
                     video_fps=args.video_fps,
                     srt_port=args.srt_port,
                     klv_port=args.klv_port,

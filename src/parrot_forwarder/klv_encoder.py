@@ -379,9 +379,17 @@ class MISB0601Encoder:
         return bytes(klv_packet)
 
 
-def _build_aion_telemetry_payload(telemetry: Dict[str, Any]) -> dict[str, Any]:
+def _build_aion_telemetry_payload(
+    telemetry: Dict[str, Any],
+    *,
+    include_raw_sdk_state: bool = True,
+) -> dict[str, Any]:
     source_name = telemetry.get("source_name") or telemetry.get("product_name") or UNKNOWN_SOURCE_ID
     source_id = telemetry.get("source_id") or _safe_source_id(source_name)
+    payload_telemetry = dict(telemetry)
+    if not include_raw_sdk_state:
+        payload_telemetry.pop("olympe_state", None)
+        payload_telemetry.pop("olympe_event_state", None)
     return {
         "contract_version": AION_TELEMETRY_CONTRACT_VERSION,
         "source": "parrot_forwarder",
@@ -390,11 +398,15 @@ def _build_aion_telemetry_payload(telemetry: Dict[str, Any]) -> dict[str, Any]:
         "timestamp": telemetry.get("timestamp"),
         "timestamp_us": telemetry.get("timestamp_us"),
         "sequence": telemetry.get("sequence"),
-        "telemetry": telemetry,
+        "telemetry": payload_telemetry,
     }
 
 
-def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
+def encode_telemetry_to_klv(
+    telemetry: Dict[str, Any],
+    *,
+    include_raw_sdk_state: bool = True,
+) -> Optional[bytes]:
     """
     Encode telemetry dictionary into MISB 0601 KLV packet.
     
@@ -500,7 +512,12 @@ def encode_telemetry_to_klv(telemetry: Dict[str, Any]) -> Optional[bytes]:
         # Note: Gimbal offsets and camera alignment offsets are collected
         # in telemetry dict and available for post-processing or alternative uses
 
-        encoder.add_aion_telemetry_json(_build_aion_telemetry_payload(telemetry))
+        encoder.add_aion_telemetry_json(
+            _build_aion_telemetry_payload(
+                telemetry,
+                include_raw_sdk_state=include_raw_sdk_state,
+            )
+        )
         
         # Pack and return (even if empty - will contain just the KLV header)
         return encoder.pack()

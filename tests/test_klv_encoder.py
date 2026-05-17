@@ -99,6 +99,9 @@ def test_encode_telemetry_to_klv_preserves_raw_sdk_state_extension() -> None:
             "latitude": 36.7,
             "longitude": -4.28,
             "altitude": 100.0,
+            "altitude_relative_takeoff_m": 3.4,
+            "altitude_takeoff_m": 3.4,
+            "altitude_agl": 3.2,
             "olympe_state_count": 1,
             "olympe_state": {
                 "ardrone3.PilotingState.SpeedChanged": {
@@ -123,6 +126,48 @@ def test_encode_telemetry_to_klv_preserves_raw_sdk_state_extension() -> None:
     assert telemetry["olympe_state_count"] == 1
     assert telemetry["olympe_state"]["ardrone3.PilotingState.SpeedChanged"]["speedX"] == 1.0
     assert telemetry["olympe_event_state"]["gimbal_attitude"]["payload"]["pitch_absolute"] == -35.0
+
+
+def test_encode_telemetry_to_klv_can_omit_raw_sdk_state_extension() -> None:
+    packet = encode_telemetry_to_klv(
+        {
+            "timestamp": "2026-05-12T12:00:00.000Z",
+            "timestamp_us": 1_700_000_000_000_000,
+            "sequence": 43,
+            "latitude": 36.7,
+            "longitude": -4.28,
+            "altitude": 100.0,
+            "altitude_relative_takeoff_m": 3.4,
+            "altitude_takeoff_m": 3.4,
+            "altitude_agl": 3.2,
+            "olympe_state_count": 1,
+            "olympe_state": {
+                "ardrone3.PilotingState.SpeedChanged": {
+                    "speedX": 1.0,
+                    "speedY": 2.0,
+                    "speedZ": -0.5,
+                }
+            },
+            "olympe_event_state": {
+                "gimbal_attitude": {
+                    "updated_at": "2026-05-12T12:00:00.000Z",
+                    "payload": {"pitch_absolute": -35.0},
+                }
+            },
+        },
+        include_raw_sdk_state=False,
+    )
+
+    assert packet is not None
+    tags = _parse_lds(packet)
+    payload = json.loads(tags[MISB0601Encoder.TAG_AION_TELEMETRY_JSON].decode("utf-8"))
+    telemetry = payload["telemetry"]
+    assert telemetry["olympe_state_count"] == 1
+    assert telemetry["altitude_relative_takeoff_m"] == pytest.approx(3.4)
+    assert telemetry["altitude_takeoff_m"] == pytest.approx(3.4)
+    assert telemetry["altitude_agl"] == pytest.approx(3.2)
+    assert "olympe_state" not in telemetry
+    assert "olympe_event_state" not in telemetry
 
 
 def test_encode_telemetry_to_klv_omits_geolocation_tags_when_position_invalid() -> None:
