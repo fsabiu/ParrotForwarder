@@ -120,6 +120,138 @@ For a VM deployment, keep the instructions generic:
 - After boot, verify the guest sees the controller with `lsusb` and verify the dashboard with `curl http://<machine-ip>:8080/health`.
 - If the guest firewall is enabled, allow `8080/tcp` and `8890/udp` before testing from other hosts.
 
+#### VirtualBox host-local dashboard fallback
+
+When the Linux host runs inside VirtualBox on a Mac, the bridged LAN address is
+convenient but network-dependent. It can change or stop being reachable when
+the operator switches Wi-Fi, phone hotspot, or Starlink paths. Keep a
+host-local VirtualBox NAT forward as the stable Mac-only fallback:
+
+```text
+http://127.0.0.1:8080/
+```
+
+This URL is only for the Mac running VirtualBox. It does not expose the
+dashboard to other machines. The guest must still run the Docker compose
+deployment with the dashboard bound to `0.0.0.0:8080`.
+
+Check the current VirtualBox rule from the Mac:
+
+```bash
+VM_NAME=<virtualbox-vm-name>
+VBoxManage showvminfo "$VM_NAME" --machinereadable | grep -E 'VMState=|Forwarding'
+```
+
+Expected dashboard rule:
+
+```text
+Forwarding(N)="dashboard,tcp,127.0.0.1,8080,10.0.2.15,8080"
+```
+
+`10.0.2.15` is the default VirtualBox NAT guest address. Verify it from the
+guest before changing the rule:
+
+```bash
+hostname -I
+ip -brief addr
+curl -fsS http://10.0.2.15:8080/health
+```
+
+If `http://127.0.0.1:8080/` connects but hangs while the bridged guest URL
+works, repair the NAT rule while the VM is stopped. Prefer `modifyvm` on a
+stopped VM; changing NAT port-forwards with `controlvm` on a stressed guest can
+leave `VBoxManage` blocked.
+
+```bash
+VM_NAME=<virtualbox-vm-name>
+
+# Stop the guest cleanly first, through SSH, the VM console, or the VirtualBox UI.
+# Use credentials distributed out of band; do not commit passwords.
+ssh <vm-user>@<guest-hostname-or-ip> 'sudo shutdown -h now'
+
+# After VirtualBox reports the VM stopped or aborted, rewrite the rule.
+VBoxManage modifyvm "$VM_NAME" --natpf1 delete dashboard 2>/dev/null || true
+VBoxManage modifyvm "$VM_NAME" --natpf1 \
+  'dashboard,tcp,127.0.0.1,8080,10.0.2.15,8080'
+
+VBoxManage startvm "$VM_NAME" --type headless
+```
+
+Validation after boot:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/status | jq '.runtime.dashboard'
+curl -fsS http://127.0.0.1:8080/ | grep -E 'ParrotForwarder|Height fields'
+```
+
+The fallback survives normal VM and Mac reboots because the NAT rule is stored
+in the VirtualBox VM definition. The ParrotForwarder container survives guest
+reboots if Docker is enabled and the container still has the compose restart
+policy:
+
+```bash
+sudo systemctl is-enabled docker
+sudo systemctl is-active docker
+sudo docker inspect parrot-forwarder \
+  --format 'restart={{.HostConfig.RestartPolicy.Name}} status={{.State.Status}}'
+```
+
+Expected result: Docker is `enabled` and `active`, and the container restart
+policy is `unless-stopped`.
+
+#### Hot-patch a VM checkout and running container
+
+For urgent field recovery, copy only the reviewed files into the active VM
+checkout and running container. Do not reset the VM checkout unless the
+operator explicitly approves it; the checkout can contain runtime hot patches
+or local config.
+
+From the local working tree:
+
+```bash
+tar -C . -cf - \
+  docs/contract.md \
+  src/parrot_forwarder/dashboard/static/app.js \
+  src/parrot_forwarder/dashboard/static/index.html \
+| ssh <vm-user>@<guest-hostname-or-ip> '
+  set -e
+  mkdir -p /tmp/parrot-forwarder-update
+  tar -C /tmp/parrot-forwarder-update -xf -
+  cp /tmp/parrot-forwarder-update/docs/contract.md \
+    ~/ParrotForwarder/docs/contract.md
+  cp /tmp/parrot-forwarder-update/src/parrot_forwarder/dashboard/static/app.js \
+    ~/ParrotForwarder/src/parrot_forwarder/dashboard/static/app.js
+  cp /tmp/parrot-forwarder-update/src/parrot_forwarder/dashboard/static/index.html \
+    ~/ParrotForwarder/src/parrot_forwarder/dashboard/static/index.html
+'
+```
+
+Copy the same files into the running container and restart it:
+
+```bash
+ssh <vm-user>@<guest-hostname-or-ip> '
+  set -e
+  sudo docker exec parrot-forwarder sh -lc \
+    "mkdir -p /opt/pf/docs /opt/pf/src/parrot_forwarder/dashboard/static"
+  sudo docker cp ~/ParrotForwarder/docs/contract.md \
+    parrot-forwarder:/opt/pf/docs/contract.md
+  sudo docker cp ~/ParrotForwarder/src/parrot_forwarder/dashboard/static/app.js \
+    parrot-forwarder:/opt/pf/src/parrot_forwarder/dashboard/static/app.js
+  sudo docker cp ~/ParrotForwarder/src/parrot_forwarder/dashboard/static/index.html \
+    parrot-forwarder:/opt/pf/src/parrot_forwarder/dashboard/static/index.html
+  sudo docker restart parrot-forwarder
+'
+```
+
+Then verify the runtime over the most stable dashboard URL available:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/app.js | grep source-altitudes
+curl -fsS http://127.0.0.1:8080/status | jq '.state, .runtime.forwarder'
+```
+
 If you want a host-managed config instead of the image default, uncomment the
 config bind mount in `docker-compose.yml`.
 
@@ -227,6 +359,7 @@ scripts/field_check.sh sample-n
 | `state: STREAMING` but no video at client | network / firewall | `ufw allow 8890`; verify SRT locally: `ffplay -fflags nobuffer -flags low_delay 'srt://localhost:8890'` |
 | Indoor GPS shows coordinates | stale image or downstream fallback | rebuild/restart the container and verify tag `120` has `position_valid=false` with null coordinates |
 | controller LAN IP pings but ports `180/554/44444-44447` are refused | incompatible USB-Ethernet adapter / dock path | replace the adapter chain; keep the Mac out of the USB path and use a known-good controller Ethernet path |
+| Mac `127.0.0.1:8080` connects but times out, while the VM LAN dashboard works | stale or ambiguous VirtualBox NAT forward | stop the VM and rewrite `dashboard,tcp,127.0.0.1,8080,10.0.2.15,8080` with `VBoxManage modifyvm` |
 | Dashboard blank / 404 | wrong port | confirm `supervisor.http.port` in `config.yaml` and `ss -lpn \| grep 8080` |
 | `protobuf 4.x` error | env corruption | re-run `./scripts/install.sh` - it force-reinstalls `protobuf==3.20.3` |
 
