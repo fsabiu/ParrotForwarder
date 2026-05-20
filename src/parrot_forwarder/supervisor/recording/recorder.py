@@ -144,6 +144,7 @@ class Recorder:
         self._active_path: Path | None = None
         self._started_at_dt: datetime | None = None
         self._watchdog: asyncio.Task[None] | None = None
+        self._expected_stop_proc: asyncio.subprocess.Process | None = None
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -240,6 +241,7 @@ class Recorder:
             path = self._active_path
             started_dt = self._started_at_dt
             assert path is not None and started_dt is not None
+            self._expected_stop_proc = proc
 
             if proc.returncode is None:
                 try:
@@ -259,35 +261,15 @@ class Recorder:
                         await proc.wait()
 
             stopped_at = datetime.now(UTC)
-            bytes_ = path.stat().st_size if path.exists() else 0
-            sha = await asyncio.to_thread(_sha256_of, path) if path.exists() else ""
-            duration_s = int((stopped_at - started_dt).total_seconds())
-
-            self._index.finalize(
+            result = await self._finalize_existing_file(
                 active.recording_id,
-                bytes_=bytes_,
-                sha256=sha,
-                stopped_at=stopped_at,
-            )
-            self._update_sidecar(
-                path, active.recording_id, started_dt, stopped_at, bytes_, sha
-            )
-
-            result = StoppedRecording(
-                recording_id=active.recording_id,
-                path=str(path),
-                filename=path.name,
-                duration_s=duration_s,
-                bytes=bytes_,
-                sha256=sha,
+                path,
+                started_dt,
+                stopped_at,
             )
             await self._emit("recording.stopped", asdict(result))
 
-            self._proc = None
-            self._active = None
-            self._active_meta = None
-            self._active_path = None
-            self._started_at_dt = None
+            self._clear_active_state()
             if self._watchdog is not None and not self._watchdog.done():
                 self._watchdog.cancel()
             self._watchdog = None
@@ -403,30 +385,110 @@ class Recorder:
         self, recording_id: str, proc: asyncio.subprocess.Process
     ) -> None:
         """Wait on the ffmpeg process; if it exits while we think the recording is
-        active, mark as error and emit an event."""
+        active, finalize a clean non-empty file or mark the row as error."""
         rc = await proc.wait()
-        # If stop() has already cleared self._proc, this is a normal exit.
-        if self._proc is not proc:
-            return
-        stderr = b""
-        if proc.stderr is not None:
-            try:
-                stderr = await proc.stderr.read()
-            except Exception:  # noqa: BLE001
-                stderr = b""
-        reason_lines = stderr.decode(errors="replace").strip().splitlines()
-        reason = reason_lines[-1] if reason_lines else f"ffmpeg exited rc={rc}"
-        logger.error("recorder %s crashed: rc=%s reason=%s", recording_id, rc, reason)
-        self._index.mark_error(recording_id, reason)
-        await self._emit(
-            "recording.error",
-            {"recording_id": recording_id, "rc": rc, "reason": reason},
+        async with self._lock:
+            # If stop() has claimed or cleared this process, it owns finalization.
+            if self._proc is not proc or self._expected_stop_proc is proc:
+                return
+            active = self._active
+            path = self._active_path
+            started_dt = self._started_at_dt
+            if active is None or path is None or started_dt is None:
+                return
+
+            stopped_at = datetime.now(UTC)
+            if rc == 0 and path.exists() and path.stat().st_size > 0:
+                result = await self._finalize_existing_file(
+                    recording_id,
+                    path,
+                    started_dt,
+                    stopped_at,
+                    sidecar_extra={
+                        "interrupted": True,
+                        "finalized_reason": "source_ended",
+                    },
+                )
+                logger.warning(
+                    "recorder %s ended without explicit stop; finalized partial file "
+                    "(bytes=%s)",
+                    recording_id,
+                    result.bytes,
+                )
+                await self._emit(
+                    "recording.stopped",
+                    {
+                        **asdict(result),
+                        "interrupted": True,
+                        "finalized_reason": "source_ended",
+                        "rc": rc,
+                    },
+                )
+                self._clear_active_state()
+                return
+
+            stderr = b""
+            if proc.stderr is not None:
+                try:
+                    stderr = await proc.stderr.read()
+                except Exception:  # noqa: BLE001
+                    stderr = b""
+            reason_lines = stderr.decode(errors="replace").strip().splitlines()
+            reason = reason_lines[-1] if reason_lines else f"ffmpeg exited rc={rc}"
+            if rc == 0:
+                reason = f"{reason}; output file missing or empty"
+            logger.error("recorder %s crashed: rc=%s reason=%s", recording_id, rc, reason)
+            self._index.mark_error(recording_id, reason)
+            await self._emit(
+                "recording.error",
+                {"recording_id": recording_id, "rc": rc, "reason": reason},
+            )
+            self._clear_active_state()
+
+    async def _finalize_existing_file(
+        self,
+        recording_id: str,
+        path: Path,
+        started_at: datetime,
+        stopped_at: datetime,
+        *,
+        sidecar_extra: dict[str, object] | None = None,
+    ) -> StoppedRecording:
+        bytes_ = path.stat().st_size if path.exists() else 0
+        sha = await asyncio.to_thread(_sha256_of, path) if path.exists() else ""
+        duration_s = int((stopped_at - started_at).total_seconds())
+
+        self._index.finalize(
+            recording_id,
+            bytes_=bytes_,
+            sha256=sha,
+            stopped_at=stopped_at,
         )
+        self._update_sidecar(
+            path,
+            recording_id,
+            started_at,
+            stopped_at,
+            bytes_,
+            sha,
+            extra=sidecar_extra,
+        )
+        return StoppedRecording(
+            recording_id=recording_id,
+            path=str(path),
+            filename=path.name,
+            duration_s=duration_s,
+            bytes=bytes_,
+            sha256=sha,
+        )
+
+    def _clear_active_state(self) -> None:
         self._proc = None
         self._active = None
         self._active_meta = None
         self._active_path = None
         self._started_at_dt = None
+        self._expected_stop_proc = None
 
     def _write_sidecar(
         self,
@@ -461,6 +523,8 @@ class Recorder:
         stopped_at: datetime,
         bytes_: int,
         sha: str,
+        *,
+        extra: dict[str, object] | None = None,
     ) -> None:
         sidecar = path.with_suffix(".meta.json")
         try:
@@ -475,6 +539,8 @@ class Recorder:
                 "sha256": sha,
             }
         )
+        if extra:
+            payload.update(extra)
         _atomic_write_json(sidecar, payload)
 
     async def _emit(self, event_type: str, payload: dict[str, object]) -> None:

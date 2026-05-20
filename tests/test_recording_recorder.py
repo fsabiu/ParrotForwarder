@@ -71,6 +71,41 @@ exit 1
 
 
 @pytest.fixture()
+def ending_ffmpeg(tmp_path: Path) -> Path:
+    """Write a fake ffmpeg that exits cleanly after the startup smoke window."""
+    script = tmp_path / "ending_ffmpeg.sh"
+    script.write_text(
+        """#!/bin/sh
+OUT=""
+for arg in "$@"; do OUT="$arg"; done
+printf 'PARTIAL_TS_CAPTURE' > "$OUT"
+sleep 0.65
+echo "size=16kB time=00:00:05.00 bitrate=26.2kbits/s speed=1x" >&2
+exit 0
+""",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return script
+
+
+@pytest.fixture()
+def async_failing_ffmpeg(tmp_path: Path) -> Path:
+    """Write a fake ffmpeg that fails after start() has returned."""
+    script = tmp_path / "async_fail_ffmpeg.sh"
+    script.write_text(
+        """#!/bin/sh
+sleep 0.65
+echo "srt: source disconnected" >&2
+exit 2
+""",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return script
+
+
+@pytest.fixture()
 def root(tmp_path: Path) -> Path:
     p = tmp_path / "recordings"
     p.mkdir()
@@ -85,7 +120,10 @@ def index(root: Path) -> RecordingIndex:
 
 
 def _make_recorder(
-    root: Path, index: RecordingIndex, ffmpeg: Path, events: list[tuple[str, dict]] | None = None
+    root: Path,
+    index: RecordingIndex,
+    ffmpeg: Path,
+    events: list[tuple[str, dict]] | None = None,
 ) -> Recorder:
     async def sink(event_type: str, payload: dict[str, object]) -> None:
         if events is not None:
@@ -150,6 +188,7 @@ async def test_start_creates_file_and_sidecar_and_row(
     assert sidecar_after["sha256"] == result.sha256
 
     assert any(evt[0] == "recording.stopped" for evt in events)
+    assert not any(evt[0] == "recording.error" for evt in events)
     assert not rec.is_running()
 
 
@@ -192,6 +231,79 @@ async def test_ffmpeg_failure_is_surfaced(
     assert len(rows) == 1
     assert rows[0].state == "error"
     assert rows[0].error_reason  # something about connection refused
+
+
+@pytest.mark.asyncio
+async def test_autonomous_clean_ffmpeg_exit_finalizes_existing_file(
+    root: Path, index: RecordingIndex, ending_ffmpeg: Path
+) -> None:
+    events: list[tuple[str, dict]] = []
+    rec = _make_recorder(root, index, ending_ffmpeg, events)
+
+    active = await rec.start(RecordingMeta(notes="field ended"))
+    deadline = asyncio.get_running_loop().time() + 2
+    row = index.get(active.recording_id)
+    while row is not None and row.state == "active" and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.05)
+        row = index.get(active.recording_id)
+
+    assert row is not None
+    assert row.state == "finalized"
+    assert row.bytes == len(b"PARTIAL_TS_CAPTURE")
+    assert row.sha256
+    assert not rec.is_running()
+
+    stopped_events = [evt for evt in events if evt[0] == "recording.stopped"]
+    assert stopped_events
+    assert stopped_events[-1][1]["interrupted"] is True
+    assert stopped_events[-1][1]["finalized_reason"] == "source_ended"
+    assert not any(evt[0] == "recording.error" for evt in events)
+
+    sidecar = json.loads(Path(active.path).with_suffix(".meta.json").read_text())
+    assert sidecar["interrupted"] is True
+    assert sidecar["finalized_reason"] == "source_ended"
+
+
+@pytest.mark.asyncio
+async def test_autonomous_nonzero_ffmpeg_exit_remains_error(
+    root: Path, index: RecordingIndex, async_failing_ffmpeg: Path
+) -> None:
+    events: list[tuple[str, dict]] = []
+    rec = _make_recorder(root, index, async_failing_ffmpeg, events)
+
+    active = await rec.start(RecordingMeta())
+    deadline = asyncio.get_running_loop().time() + 2
+    row = index.get(active.recording_id)
+    while row is not None and row.state == "active" and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.05)
+        row = index.get(active.recording_id)
+
+    assert row is not None
+    assert row.state == "error"
+    assert row.error_reason == "srt: source disconnected"
+    assert not rec.is_running()
+    assert any(evt[0] == "recording.error" for evt in events)
+    assert not any(evt[0] == "recording.stopped" for evt in events)
+
+
+@pytest.mark.asyncio
+async def test_manual_stop_is_not_reported_as_watchdog_error(
+    root: Path, index: RecordingIndex, mock_ffmpeg: Path
+) -> None:
+    events: list[tuple[str, dict]] = []
+    rec = _make_recorder(root, index, mock_ffmpeg, events)
+
+    active = await rec.start(RecordingMeta())
+    await asyncio.sleep(0.1)
+    result = await rec.stop()
+    await asyncio.sleep(0.1)
+
+    row = index.get(active.recording_id)
+    assert row is not None
+    assert row.state == "finalized"
+    assert result.bytes > 0
+    assert any(evt[0] == "recording.stopped" for evt in events)
+    assert not any(evt[0] == "recording.error" for evt in events)
 
 
 @pytest.mark.asyncio
