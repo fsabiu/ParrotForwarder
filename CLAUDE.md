@@ -11,9 +11,11 @@ Before working here, read the root project files:
 Do not rely on chat history as authority. Decisions, status, contracts, and validation evidence must be written in the source-of-truth docs.
 
 All implementation work uses a short-lived task branch from the current
-`ParrotForwarder:e2e` head and enters through a PR back to `e2e`. The Pully
-AION PR agent reviews eligible PRs on its five-minute cycle; Francesco or a
-delegated maintainer handles held, skipped, or owner-decision PRs.
+`ParrotForwarder:e2e` head and enters through a PR back to `e2e`. Put exact
+module validation commands/results in the module PR body or comment before
+review; root WP evidence is normally recorded in the post-merge pointer
+follow-up. The Pully AION PR agent checks eligible PRs on its five-minute
+cycle; review and merge authority follows root governance.
 
 Develop locally or in a dedicated Gonzalo workspace outside the deployed e2e,
 V1, and demo roots defined by root governance. Never use a deployed runtime
